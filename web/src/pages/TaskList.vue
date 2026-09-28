@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { notify, confirmAction } from "@/lib/feedback";
 
 import { Button } from "@/components/ui/button";
@@ -24,9 +24,14 @@ import {
   ArrowRight,
   Check,
   Circle,
+  Pencil,
+  Play,
+  ChevronLeft,
+  ChevronRight,
+  X,
 } from "lucide-vue-next";
 
-import { api, dateText, statusText } from "../api";
+import { api, save, uploadTask, dateText, statusText } from "../api";
 import type { Task, RuleGroup } from "../types/rfcAudit";
 import ReviewDetail from "./ReviewDetail.vue";
 const emit = defineEmits<{ navigate: [page: string] }>();
@@ -35,17 +40,54 @@ const tasks = ref<Task[]>([]),
   selected = ref(""),
   modelReady = ref(false),
   uploadOpen = ref(false),
-  file = ref<File>(),
+  queue = ref<UploadEntry[]>([]),
   groupId = ref(""),
   uploading = ref(false),
   loading = ref(true),
   error = ref(""),
   query = ref("");
+interface UploadEntry {
+  id: string;
+  file: File;
+  status: "waiting" | "uploading" | "done" | "error";
+  progress: number;
+  error: string;
+  group?: string;
+  taskId?: string;
+}
+const statusFilter = ref("all"),
+  page = ref(1),
+  batchBusy = ref(false),
+  renaming = ref<Task>(),
+  renameTitle = ref(""),
+  renameBusy = ref(false);
+const recoverable = computed(() =>
+  tasks.value.filter((t) => ["failed", "cancelled"].includes(t.Status)),
+);
 const filtered = computed(() =>
-  tasks.value.filter((t) =>
-    t.Title.toLowerCase().includes(query.value.toLowerCase()),
+  tasks.value.filter(
+    (t) =>
+      (t.Title + " " + t.GroupName)
+        .toLowerCase()
+        .includes(query.value.toLowerCase()) &&
+      (statusFilter.value === "all" ||
+        (statusFilter.value === "active"
+          ? ["running", "queued"].includes(t.Status)
+          : statusFilter.value === "attention"
+            ? ["failed", "cancelled"].includes(t.Status)
+            : statusFilter.value === "issues"
+              ? t.FailedCount > 0
+              : t.Status === "completed")),
   ),
 );
+const pageCount = computed(() =>
+  Math.max(1, Math.ceil(filtered.value.length / 20)),
+);
+const paged = computed(() =>
+  filtered.value.slice((page.value - 1) * 20, page.value * 20),
+);
+watch([query, statusFilter], () => (page.value = 1));
+watch(pageCount, (count) => (page.value = Math.min(page.value, count)));
 const active = computed(
   () =>
     tasks.value.filter((t) => ["running", "queued"].includes(t.Status)).length,
@@ -88,39 +130,135 @@ onBeforeUnmount(() => {
   clearTimeout(timer);
 });
 async function upload() {
-  if (!file.value || !groupId.value) {
-    notify.warning("请选择 ZIP 方案和规则组");
-    return;
-  }
+  if (uploading.value || !groupId.value || !queue.value.length) return;
   uploading.value = true;
+  const pending = queue.value.filter((q) => q.status !== "done");
+  let successes = 0;
   try {
-    const task = await api<Task>(
-      `/tasks?group=${encodeURIComponent(groupId.value)}&fileName=${encodeURIComponent(file.value.name)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/zip" },
-        body: file.value,
-      },
-    );
-    uploadOpen.value = false;
-    file.value = undefined;
-    selected.value = task.Id;
-    await refresh();
-  } catch (e: any) {
-    notify.error({ message: e.message, duration: 6000 });
+    for (const entry of pending) {
+      entry.status = "uploading";
+      entry.progress = 0;
+      entry.error = "";
+      entry.group ||= groupId.value;
+      try {
+        const task = await uploadTask(
+          entry.file,
+          entry.group,
+          entry.id,
+          (value) => (entry.progress = value),
+        );
+        entry.status = "done";
+        entry.taskId = task.Id;
+        successes++;
+      } catch (e: any) {
+        entry.status = "error";
+        entry.error = e.message;
+      }
+      await refresh();
+    }
+    if (successes) {
+      notify.success(`已创建 ${successes} 个审核任务`);
+      statusFilter.value = "all";
+      query.value = "";
+      page.value = 1;
+    }
+    if (queue.value.every((q) => q.status === "done")) {
+      if (queue.value.length === 1) selected.value = queue.value[0]!.taskId!;
+      uploadOpen.value = false;
+      queue.value = [];
+    }
   } finally {
     uploading.value = false;
   }
 }
 function chooseFile(event: Event) {
-  const next = (event.target as HTMLInputElement).files?.[0];
-  if (!next) return;
-  if (!/\.zip$/i.test(next.name) || next.size > 50 * 1024 * 1024) {
-    notify.error("请选择 50 MB 以内的 ZIP 方案包");
-    return;
+  const input = event.target as HTMLInputElement;
+  for (const file of Array.from(input.files || [])) {
+    if (queue.value.length >= 20) {
+      notify.warning("每批最多选择 20 份方案");
+      break;
+    }
+    if (!/\.zip$/i.test(file.name) || file.size > 50 * 1024 * 1024) {
+      notify.error(`${file.name}：请选择 50 MB 以内的 ZIP 文件`);
+      continue;
+    }
+    if (
+      queue.value.some(
+        (q) =>
+          q.file.name === file.name &&
+          q.file.size === file.size &&
+          q.file.lastModified === file.lastModified,
+      )
+    )
+      continue;
+    queue.value.push({
+      id: crypto.randomUUID(),
+      file,
+      status: "waiting",
+      progress: 0,
+      error: "",
+    });
   }
-  file.value = next;
+  input.value = "";
 }
+async function resumeTasks(list: Task[]) {
+  if (batchBusy.value || !list.length) return;
+  try {
+    await confirmAction(
+      `继续 ${list.length} 个未完成任务？已有结论会保留，仅审核剩余项目，并使用当前模型配置。`,
+      "继续审核",
+      { confirmButtonText: "继续审核" },
+    );
+    batchBusy.value = true;
+    let success = 0;
+    const errors: string[] = [];
+    for (const task of list)
+      try {
+        await api(`/tasks/${task.Id}/retry`, { method: "POST" });
+        success++;
+      } catch (e: any) {
+        errors.push(e.message);
+      }
+    await refresh();
+    if (success) notify.success(`已恢复 ${success} 个任务`);
+    if (errors.length)
+      notify.error(`${errors.length} 个任务未恢复：${errors[0]}`);
+  } catch (e: any) {
+    if (e instanceof Error) notify.error(e.message);
+  } finally {
+    batchBusy.value = false;
+  }
+}
+function rename(task: Task) {
+  renaming.value = task;
+  renameTitle.value = task.Title;
+}
+async function submitRename() {
+  if (!renaming.value || renameBusy.value) return;
+  renameBusy.value = true;
+  try {
+    await save(
+      `/tasks/${renaming.value.Id}`,
+      { Title: renameTitle.value },
+      "PATCH",
+    );
+    renaming.value = undefined;
+    await refresh();
+    notify.success("方案名称已更新");
+  } catch (e: any) {
+    notify.error(e.message);
+  } finally {
+    renameBusy.value = false;
+  }
+}
+function mayLeave() {
+  if (uploading.value) {
+    notify.warning("文件正在上传，请等待这批上传完成");
+    return false;
+  }
+  return true;
+}
+defineExpose({ mayLeave });
 async function remove(task: Task) {
   try {
     await confirmAction(
@@ -183,9 +321,32 @@ async function remove(task: Task) {
         </button>
       </div>
     </div>
+    <div v-if="recoverable.length" class="recovery-banner">
+      <div>
+        <b>{{ recoverable.length }} 个审核尚未完成</b>
+        <p>已确认的结果会保留，可继续处理剩余检查项。</p>
+      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        :disabled="batchBusy"
+        @click="resumeTasks(recoverable)"
+        ><Play />继续未完成任务</Button
+      >
+    </div>
     <div class="table-toolbar">
       <div class="section-caption">
-        全部方案
+        <SelectField
+          v-model="statusFilter"
+          label="筛选任务状态"
+          :options="[
+            { value: 'all', label: '全部方案' },
+            { value: 'active', label: '正在处理' },
+            { value: 'attention', label: '待继续' },
+            { value: 'issues', label: '有修改建议' },
+            { value: 'completed', label: '已完成' },
+          ]"
+        />
         <span v-if="active" class="running-label"
           ><span class="local-dot" />{{ active }} 个正在处理</span
         >
@@ -212,7 +373,7 @@ async function remove(task: Task) {
         </thead>
         <tbody>
           <tr
-            v-for="task in filtered"
+            v-for="task in paged"
             :key="task.Id"
             @dblclick="selected = task.Id"
           >
@@ -257,6 +418,20 @@ async function remove(task: Task) {
                 <Button variant="ghost" size="sm" @click="selected = task.Id"
                   >打开<ArrowUpRight /></Button
                 ><Button
+                  v-if="['failed', 'cancelled'].includes(task.Status)"
+                  variant="ghost"
+                  size="icon-sm"
+                  :disabled="batchBusy"
+                  :aria-label="`继续审核 ${task.Title}`"
+                  @click="resumeTasks([task])"
+                  ><Play /></Button
+                ><Button
+                  variant="ghost"
+                  size="icon-sm"
+                  :aria-label="`重命名 ${task.Title}`"
+                  @click="rename(task)"
+                  ><Pencil :size="14" /></Button
+                ><Button
                   variant="ghost"
                   size="icon-sm"
                   class="delete-action"
@@ -274,23 +449,73 @@ async function remove(task: Task) {
           ><div class="empty-icon">
             <FileArchive :size="28" :stroke-width="1.4" />
           </div>
-          <h2>{{ query ? "没有找到相关方案" : "让下一份方案，更有把握" }}</h2>
+          <h2>{{ query || statusFilter !== 'all' ? "没有找到相关方案" : "让下一份方案，更有把握" }}</h2>
           <p>
             {{
-              query
-                ? "换个关键词试试。"
+              query || statusFilter !== 'all'
+                ? "换个关键词或筛选条件试试。"
                 : "上传包含 HTML 和图片的 ZIP 方案包，即可开始逐项审核。"
             }}
           </p>
-          <Button v-if="!query" variant="outline" @click="uploadOpen = true"
+          <Button v-if="!query && statusFilter === 'all'" variant="outline" @click="uploadOpen = true"
             ><Plus />上传第一份方案</Button
           ></template
         >
       </div>
     </div>
     <div class="list-foot">
-      <span>方案与记录保存在本机</span><span>支持 HTML 方案包 · ZIP</span>
+      <span>共 {{ filtered.length }} 个方案 · 每页 20 个</span>
+      <div class="actions">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="上一页"
+          :disabled="page <= 1"
+          @click="page--"
+          ><ChevronLeft /></Button
+        ><span>{{ page }} / {{ pageCount }}</span
+        ><Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="下一页"
+          :disabled="page >= pageCount"
+          @click="page++"
+          ><ChevronRight
+        /></Button>
+      </div>
     </div>
+    <Dialog
+      :open="!!renaming"
+      @update:open="
+        (value) => {
+          if (!value && !renameBusy) renaming = undefined;
+        }
+      "
+      ><DialogContent
+        ><DialogHeader
+          ><DialogTitle>重命名方案</DialogTitle
+          ><DialogDescription
+            >只修改显示名称，方案文件和审核结果会保留。</DialogDescription
+          ></DialogHeader
+        ><Input
+          v-model="renameTitle"
+          maxlength="500"
+          aria-label="方案名称"
+          @keydown.enter="submitRename"
+        /><DialogFooter
+          ><Button
+            variant="outline"
+            :disabled="renameBusy"
+            @click="renaming = undefined"
+            >取消</Button
+          ><Button
+            :disabled="renameBusy || !renameTitle.trim()"
+            @click="submitRename"
+            >保存</Button
+          ></DialogFooter
+        ></DialogContent
+      ></Dialog
+    >
     <Dialog
       :open="uploadOpen"
       @update:open="
@@ -313,22 +538,66 @@ async function remove(task: Task) {
           ><label class="upload-zone"
             ><input
               type="file"
+              multiple
               accept=".zip,application/zip"
               :disabled="uploading"
               @change="chooseFile"
             /><span class="upload-glyph"><Upload :size="24" /></span
-            ><b>{{ file?.name || "点击选择 ZIP 方案包" }}</b
-            ><small>保留 HTML、样式与图片 · 最大 50 MB</small
-            ><span v-if="file" class="file-size"
-              >{{ (file.size / 1024 / 1024).toFixed(2) }} MB · 点击更换</span
-            ></label
+            ><b>{{
+              queue.length
+                ? `已选择 ${queue.length} 份方案 · 点击添加`
+                : "选择一个或多个 ZIP 方案包"
+            }}</b
+            ><small>每份最大 50 MB · 每批最多 20 份</small></label
           >
+          <div v-if="queue.length" class="upload-queue">
+            <div v-for="entry in queue" :key="entry.id" class="upload-entry">
+              <div>
+                <b>{{ entry.file.name }}</b
+                ><small
+                  :class="entry.status === 'error' ? 'danger' : 'muted'"
+                  >{{
+                    entry.status === "uploading"
+                      ? entry.progress === 100
+                        ? "正在解析方案…"
+                        : `上传 ${entry.progress}%`
+                      : entry.status === "done"
+                        ? "已创建任务"
+                        : entry.status === "error"
+                          ? entry.error
+                          : `${(entry.file.size / 1024 / 1024).toFixed(2)} MB · 等待上传`
+                  }}</small
+                >
+              </div>
+              <Check
+                v-if="entry.status === 'done'"
+                :size="15"
+                class="success"
+              /><LoaderCircle
+                v-else-if="entry.status === 'uploading'"
+                :size="15"
+                class="animate-spin"
+              /><Button
+                v-else
+                variant="ghost"
+                size="icon-sm"
+                :disabled="uploading"
+                :aria-label="`移除 ${entry.file.name}`"
+                @click="queue = queue.filter((q) => q.id !== entry.id)"
+                ><X :size="14"
+              /></Button>
+            </div>
+          </div>
+          <div v-if="queue.length" class="actions justify-between">
+            <small class="muted">清空选择不会删除已创建的任务。</small>
+            <Button variant="ghost" size="sm" :disabled="uploading" @click="queue = []">清空选择</Button>
+          </div>
           <div class="field">
             <label>审核规则组</label
             ><SelectField
               v-model="groupId"
               label="审核规则组"
-              :disabled="uploading"
+              :disabled="uploading || queue.some((q) => !!q.group)"
               :options="
                 groups.map((g) => ({
                   value: g.id,
@@ -338,7 +607,7 @@ async function remove(task: Task) {
             />
           </div>
           <p class="field-hint">
-            以方案文件名自动命名，上传后立即开始。
+            按文件名命名，上传成功后进入审核队列。失败的文件可单独重试。
           </p></template
         >
         <div v-else class="empty-state compact-empty">
@@ -360,13 +629,24 @@ async function remove(task: Task) {
             variant="outline"
             :disabled="uploading"
             @click="uploadOpen = false"
-            >取消</Button
+            >关闭</Button
           ><Button
-            :disabled="uploading || !file || !groupId || !modelReady"
+            :disabled="
+              uploading ||
+              !queue.some((q) => q.status !== 'done') ||
+              !groupId ||
+              !modelReady
+            "
             @click="upload"
             ><LoaderCircle v-if="uploading" class="animate-spin" /><ArrowRight
               v-else
-            />{{ uploading ? "正在上传…" : "开始审核" }}</Button
+            />{{
+              uploading
+                ? "正在上传…"
+                : queue.some((q) => q.status === "error")
+                  ? "重试失败文件"
+                  : "上传并开始审核"
+            }}</Button
           ></DialogFooter
         >
       </DialogContent></Dialog

@@ -1,3 +1,4 @@
+import { readableError } from "./errors.js";
 import { readFile } from "node:fs/promises";
 import { parsePackage } from "../agents/rfc-review/document.js";
 import { PiReviewer, type Reviewer } from "../agents/rfc-review/reviewer.js";
@@ -45,7 +46,7 @@ export class Engine {
       task.Status = "running";
       task.Attempt++;
       task.LastError = "";
-      task.Usage = { input: 0, output: 0, cache: 0 };
+      task.Usage ??= { input: 0, output: 0, cache: 0 };
       task.Model = { name: settings.model, baseUrl: settings.baseUrl };
       this.store.saveTask(task);
       const controller = new AbortController();
@@ -95,6 +96,7 @@ export class Engine {
     controller: AbortController,
   ) {
     const signal = controller.signal;
+    const started = Date.now();
     const config: RfcReviewConfig = {
       runTimeoutMs: 1800000,
       maxModelCalls: 300,
@@ -121,6 +123,11 @@ export class Engine {
     };
     try {
       const task = this.store.task(id)!;
+      if (task.Checklist.every((item) => item.Status === "completed")) {
+        task.Status = "completed";
+        this.store.saveTask(task);
+        return;
+      }
       this.activity.set(id, {
         Preview: "正在读取方案包",
         UpdatedAt: new Date().toISOString(),
@@ -185,13 +192,19 @@ export class Engine {
       if (current?.Status === "running" && current.Attempt === attempt) {
         current.Status = "failed";
         current.LastError = logPreview(
-          error instanceof Error ? error.message : String(error),
+          readableError(error),
           [model.apiKey || ""],
           600,
         );
         if (current.LastError.includes("MODEL_NO_TOOL_PROGRESS"))
           current.LastError =
             "模型连续 3 轮未产生工具动作，已停止避免空转。可调整模型或输出额度后继续审核。";
+        this.store.saveTask(current);
+      }
+    } finally {
+      const current = this.store.task(id);
+      if (current?.Attempt === attempt) {
+        current.DurationMs = (current.DurationMs || 0) + Date.now() - started;
         this.store.saveTask(current);
       }
     }

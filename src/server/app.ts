@@ -1,4 +1,6 @@
 import http from "node:http";
+import { MIME } from "./mime.js";
+import { readableError } from "./errors.js";
 import { readFile, writeFile, unlink } from "node:fs/promises";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import path from "node:path";
@@ -13,24 +15,16 @@ import {
 } from "./store.js";
 import { Engine } from "./engine.js";
 import { desktopSession } from "./desktop-session.js";
+import { testModel } from "./model-test.js";
+import { report } from "./report.js";
+import {
+  exportWorkspace,
+  importWorkspace,
+  workspaceInfo,
+  diagnostics,
+  BACKUP_LIMIT,
+} from "./workspace.js";
 
-const MIME: Record<string, string> = {
-  ".html": "text/html",
-  ".htm": "text/html",
-  ".css": "text/css",
-  ".js": "text/javascript",
-  ".json": "application/json",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".webp": "image/webp",
-  ".svg": "image/svg+xml",
-  ".ico": "image/x-icon",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-  ".ttf": "font/ttf",
-};
 async function body(req: http.IncomingMessage, maximum = 2 * 1024 * 1024) {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -59,6 +53,9 @@ export function createApp(
   options: { desktopSecret?: string } = {},
 ) {
   const token = randomBytes(32).toString("hex");
+  let maintenance = false,
+    activeWrites = 0;
+  const uploads = new Map<string, Promise<TaskRecord>>();
   const allowSession = desktopSession(options.desktopSecret);
   const webRoot = fileURLToPath(new URL("../web/", import.meta.url));
   const server = http.createServer(async (req, res) => {
@@ -70,6 +67,7 @@ export function createApp(
       res.setHeader("Cache-Control", "no-store");
       res.end(JSON.stringify(value));
     };
+    let mutation = false;
     try {
       const host = req.headers.host || "";
       if (!/^(?:localhost|127\.0\.0\.1)(?::\d+)?$/.test(host))
@@ -85,6 +83,8 @@ export function createApp(
         if (req.headers["sec-fetch-site"] === "cross-site")
           return send({ error: "请求来源不允许" }, 403);
         if (req.method !== "GET") {
+          if (maintenance)
+            return send({ error: "正在备份或恢复数据，请稍后再操作" }, 503);
           const provided = Buffer.from(
             String(req.headers["x-studio-token"] || ""),
           );
@@ -93,6 +93,48 @@ export function createApp(
             !timingSafeEqual(provided, Buffer.from(token))
           )
             return send({ error: "页面已失效，请刷新后再试" }, 403);
+          mutation = true;
+          activeWrites++;
+        }
+        if (p === "/api/workspace" && req.method === "GET")
+          return send(await workspaceInfo(store));
+        if (p === "/api/diagnostics" && req.method === "GET") {
+          res.setHeader(
+            "Content-Disposition",
+            'attachment; filename="rfc-studio-diagnostics.json"',
+          );
+          return send(diagnostics(store));
+        }
+        if (p === "/api/backup" && req.method === "GET") {
+          if (maintenance || activeWrites)
+            return send({ error: "有操作尚未结束，请稍后再备份" }, 409);
+          maintenance = true;
+          try {
+            const raw = await exportWorkspace(store);
+            res.setHeader("Content-Type", "application/zip");
+            res.setHeader(
+              "Content-Disposition",
+              `attachment; filename="rfc-studio-backup-${new Date().toISOString().slice(0, 10)}.zip"`,
+            );
+            return res.end(raw);
+          } finally {
+            maintenance = false;
+          }
+        }
+        if (p === "/api/backup" && req.method === "POST") {
+          if (maintenance || activeWrites > 1)
+            return send({ error: "有操作尚未结束，请稍后再恢复" }, 409);
+          maintenance = true;
+          try {
+            return send(
+              await importWorkspace(
+                store,
+                await body(req, BACKUP_LIMIT + 1024 * 1024),
+              ),
+            );
+          } finally {
+            maintenance = false;
+          }
         }
         if (p === "/api/bootstrap" && req.method === "GET")
           return send({
@@ -112,42 +154,32 @@ export function createApp(
           return send(store.model());
         if (p === "/api/model" && req.method === "PUT") {
           const value = await json(req);
-          const result = store.saveModel(
-            validateModel(value),
-            value.clearKey === true,
-          );
+          const draft = validateModel(value);
+          const saved = store.model();
+          if (
+            saved.hasApiKey &&
+            !value.clearKey &&
+            !draft.apiKey?.trim() &&
+            draft.baseUrl !== saved.baseUrl
+          )
+            throw new Error(
+              "API 地址已改变，请填写此服务的 API Key，避免将旧 Key 发往新的地址",
+            );
+          const result = store.saveModel(draft, value.clearKey === true);
           engine.pump();
           return send(result);
         }
         if (p === "/api/model/test" && req.method === "POST") {
-          const value = store.model(true);
-          if (!value.apiKey) throw new Error("请先保存 API Key");
-          const response = await fetch(`${value.baseUrl}/chat/completions`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${value.apiKey}`,
-            },
-            signal: AbortSignal.timeout(
-              Math.min(30000, value.requestTimeoutMs),
-            ),
-            body: JSON.stringify({
-              model: value.model,
-              messages: [{ role: "user", content: "只回复 OK" }],
-              max_tokens: 64,
-              ...(value.provider === "deepseek"
-                ? { thinking: { type: "disabled" } }
-                : {}),
-            }),
-          });
-          const result: any = await response.json();
-          if (!response.ok)
-            throw new Error(
-              `模型接口 HTTP ${response.status}：${logPreview(String(result?.error?.message || "调用失败"), [value.apiKey], 300)}`,
-            );
-          if (!Array.isArray(result.choices) || !result.choices.length)
-            throw new Error("接口未返回有效的 Chat Completions 响应");
-          return send({ message: "连接成功", model: value.model });
+          const raw = await body(req);
+          const saved = store.model(true);
+          const draft = raw.length
+            ? validateModel(JSON.parse(raw.toString("utf8")))
+            : saved;
+          // A blank draft key reuses the saved key only against the saved endpoint.
+          if (!draft.apiKey?.trim() && draft.baseUrl !== saved.baseUrl)
+            throw new Error("API 地址已改变，请填写此服务的 API Key 后再测试");
+          draft.apiKey = draft.apiKey?.trim() || saved.apiKey;
+          return send(await testModel(draft));
         }
         if (p === "/api/groups" && req.method === "GET")
           return send(store.groups());
@@ -169,66 +201,96 @@ export function createApp(
         if (p === "/api/tasks" && req.method === "GET")
           return send(store.tasks().map(summary));
         if (p === "/api/tasks" && req.method === "POST") {
-          const group = store.group(url.searchParams.get("group") || "");
-          if (!group?.rules.some((rule) => rule.enabled))
-            throw new Error("请选择至少包含一条启用规则的规则组");
-          if (!store.model().hasApiKey)
-            throw new Error("请先在模型配置中填写 API Key");
-          const fileName = url.searchParams.get("fileName") || "方案.zip";
-          if (!/\.zip$/i.test(fileName) || fileName.length > 500)
-            throw new Error("请选择 ZIP 方案包");
-          const raw = await body(req, 50 * 1024 * 1024),
-            pkg = await parsePackage(raw);
-          const assets = pkg.assets || [];
+          const requestId = String(req.headers["x-upload-id"] || randomUUID());
           if (
-            assets.length > 2000 ||
-            assets.reduce((n, item) => n + item.size, 0) > 150 * 1024 * 1024
+            !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(
+              requestId,
+            )
           )
-            throw new Error("方案解压后超过 150 MB 或 2000 个文件");
-          const now = new Date().toISOString(),
-            id = randomUUID();
-          const task: TaskRecord = {
-            Id: id,
-            Title: path
-              .basename(fileName.replaceAll("\\", "/"))
-              .replace(/\.zip$/i, ""),
-            GroupName: group.name,
-            Status: "queued",
-            EntryPath:
-              pkg.documents.find((doc) =>
-                /(^|\/)zh-cn_bookmap_[^/]+\.html$/i.test(doc.path),
-              )?.path ||
-              pkg.documents.find((doc) => /(^|\/)index\.html?$/i.test(doc.path))
-                ?.path ||
-              pkg.documents[0]!.path,
-            CreatedAt: now,
-            UpdatedAt: now,
-            Attempt: 0,
-            LastError: "",
-            Checklist: group.rules
-              .filter((rule) => rule.enabled)
-              .map(({ enabled, ...rule }) => ({ ...rule, Status: "pending" })),
-            Documents: assets.map((item) => ({
-              Path: item.path,
-              Size: item.size,
-              ContentType:
-                MIME[path.extname(item.path).toLowerCase()] ||
-                "application/octet-stream",
-            })),
-            Warnings: pkg.warnings,
-          };
-          await writeFile(store.packagePath(id), raw, {
-            flag: "wx",
-            mode: 0o600,
-          });
-          try {
-            store.saveTask(task);
-          } catch (error) {
-            await unlink(store.packagePath(id));
-            throw error;
+            throw new Error("上传编号无效");
+          const existing = store.task(requestId);
+          if (existing) {
+            req.resume();
+            return send(summary(existing), 201);
           }
-          engine.pump();
-          return send(summary(task), 201);
+          const pending = uploads.get(requestId);
+          if (pending) {
+            req.resume();
+            return send(summary(await pending), 201);
+          }
+          const create = async (): Promise<TaskRecord> => {
+            const group = store.group(url.searchParams.get("group") || "");
+            if (!group?.rules.some((rule) => rule.enabled))
+              throw new Error("请选择至少包含一条启用规则的规则组");
+            if (!store.model().hasApiKey)
+              throw new Error("请先在模型配置中填写 API Key");
+            const fileName = url.searchParams.get("fileName") || "方案.zip";
+            if (!/\.zip$/i.test(fileName) || fileName.length > 500)
+              throw new Error("请选择 ZIP 方案包");
+            const raw = await body(req, 50 * 1024 * 1024),
+              pkg = await parsePackage(raw);
+            const assets = pkg.assets || [];
+            if (
+              assets.length > 2000 ||
+              assets.reduce((n, item) => n + item.size, 0) > 150 * 1024 * 1024
+            )
+              throw new Error("方案解压后超过 150 MB 或 2000 个文件");
+            const now = new Date().toISOString(),
+              id = requestId;
+            const task: TaskRecord = {
+              Id: id,
+              Title: path
+                .basename(fileName.replaceAll("\\", "/"))
+                .replace(/\.zip$/i, ""),
+              GroupName: group.name,
+              Status: "queued",
+              EntryPath:
+                pkg.documents.find((doc) =>
+                  /(^|\/)zh-cn_bookmap_[^/]+\.html$/i.test(doc.path),
+                )?.path ||
+                pkg.documents.find((doc) =>
+                  /(^|\/)index\.html?$/i.test(doc.path),
+                )?.path ||
+                pkg.documents[0]!.path,
+              CreatedAt: now,
+              UpdatedAt: now,
+              Attempt: 0,
+              LastError: "",
+              Checklist: group.rules
+                .filter((rule) => rule.enabled)
+                .map(({ enabled, ...rule }) => ({
+                  ...rule,
+                  Status: "pending",
+                })),
+              Documents: assets.map((item) => ({
+                Path: item.path,
+                Size: item.size,
+                ContentType:
+                  MIME[path.extname(item.path).toLowerCase()] ||
+                  "application/octet-stream",
+              })),
+              Warnings: pkg.warnings,
+            };
+            await writeFile(store.packagePath(id), raw, {
+              flag: "wx",
+              mode: 0o600,
+            });
+            try {
+              store.saveTask(task);
+            } catch (error) {
+              await unlink(store.packagePath(id));
+              throw error;
+            }
+            engine.pump();
+            return task;
+          };
+          const operation = create();
+          uploads.set(requestId, operation);
+          try {
+            return send(summary(await operation), 201);
+          } finally {
+            uploads.delete(requestId);
+          }
         }
         const taskMatch = p.match(
           /^\/api\/tasks\/([a-f0-9-]+)(?:\/(download|report|cancel|retry))?$/,
@@ -247,6 +309,20 @@ export function createApp(
             return res.end(await readFile(store.packagePath(id)));
           }
           if (action === "report" && req.method === "GET") {
+            const format = url.searchParams.get("format");
+            if (format === "md" || format === "html") {
+              res.setHeader(
+                "Content-Type",
+                format === "html"
+                  ? "text/html; charset=utf-8"
+                  : "text/markdown; charset=utf-8",
+              );
+              res.setHeader(
+                "Content-Disposition",
+                `attachment; filename*=UTF-8''${encodeURIComponent(task.Title + "-审核报告." + format)}`,
+              );
+              return res.end(report(task, format));
+            }
             res.setHeader(
               "Content-Disposition",
               `attachment; filename*=UTF-8''${encodeURIComponent(task.Title + "-审核结果.json")}`,
@@ -260,6 +336,20 @@ export function createApp(
           if (action === "retry" && req.method === "POST") {
             engine.retry(id);
             return send({ ok: true });
+          }
+          if (!action && req.method === "PATCH") {
+            const value = await json(req);
+            if (
+              typeof value.Title !== "string" ||
+              !value.Title.trim() ||
+              value.Title.length > 500
+            )
+              throw new Error("方案名称为必填项，最多 500 字");
+            const current = store.task(id);
+            if (!current) return send({ error: "任务不存在" }, 404);
+            current.Title = value.Title.trim();
+            store.saveTask(current);
+            return send(summary(current));
           }
           if (!action && req.method === "GET")
             return send({
@@ -310,14 +400,12 @@ export function createApp(
       }
       send(
         {
-          error: logPreview(
-            error instanceof Error ? error.message : String(error),
-            [key],
-            600,
-          ),
+          error: logPreview(readableError(error), [key], 600),
         },
         400,
       );
+    } finally {
+      if (mutation) activeWrites--;
     }
   });
   return { server, engine };

@@ -1,6 +1,6 @@
 {
   "name": "rfc-review-studio",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -23,6 +23,8 @@
     "@earendil-works/pi-ai": "0.87.0",
     "cheerio": "^1.1.2",
     "css-what": "6.2.2",
+    "jszip": "^3.10.2",
+    "marked": "^18.0.14",
     "sharp": "^0.34.4",
     "yauzl": "^3.2.0"
   },
@@ -37,9 +39,7 @@
     "clsx": "^2.1.1",
     "domhandler": "^5.0.3",
     "dompurify": "^3.4.15",
-    "jszip": "3.10.1",
     "lucide-vue-next": "^0.577.0",
-    "marked": "^18.0.5",
     "reka-ui": "^2.10.5",
     "tailwind-merge": "^3.7.0",
     "tailwindcss": "^4.3.3",

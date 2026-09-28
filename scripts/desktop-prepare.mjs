@@ -29,6 +29,7 @@ await copyFile(
   path.join(root, "package-lock.json"),
   path.join(destination, "package-lock.json"),
 );
+await copyFile(path.join(root,'THIRD-PARTY-NOTICES.md'),path.join(destination,'THIRD-PARTY-NOTICES.md'));
 const npm =
   process.env.npm_execpath ||
   path.join(path.dirname(process.execPath), "node_modules/npm/bin/npm-cli.js");

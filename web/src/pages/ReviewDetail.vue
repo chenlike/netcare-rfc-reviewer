@@ -18,10 +18,31 @@ import {
   ChevronDown,
   GripVertical,
 } from "lucide-vue-next";
-import { api, statusText } from "../api";
+import { api, statusText, downloadFile } from "../api";
 import type { Detail, RfcAuditCheck } from "../types/rfcAudit";
 import RfcDocumentPreview from "../components/RfcDocumentPreview.vue";
 import RfcMarkdown from "../components/RfcMarkdown.vue";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+const exporting = ref(false);
+async function exportReport(format: "md" | "html" | "json") {
+  if (exporting.value) return;
+  exporting.value = true;
+  try {
+    await downloadFile(
+      `/tasks/${props.id}/report?format=${format}`,
+      `${detail.value?.Task.Title || "方案"}-审核报告.${format}`,
+    );
+  } catch (e: any) {
+    notify.error(e.message);
+  } finally {
+    exporting.value = false;
+  }
+}
 const props = defineProps<{ id: string }>(),
   emit = defineEmits<{ back: [] }>();
 const detail = ref<Detail>(),
@@ -296,11 +317,29 @@ const resultLabel = (c: RfcAuditCheck) =>
                 :disabled="busy"
                 @click="action('retry')"
                 >继续审核</Button
-              ><a :href="`/api/tasks/${id}/report`" class="subtle-link"
-                >导出结果</a
+              ><DropdownMenu
+                ><DropdownMenuTrigger as-child
+                  ><Button variant="ghost" size="sm" :disabled="exporting"
+                    >导出报告</Button
+                  ></DropdownMenuTrigger
+                ><DropdownMenuContent
+                  ><DropdownMenuItem @select="exportReport('html')"
+                    >HTML · 离线阅读 / 打印</DropdownMenuItem
+                  ><DropdownMenuItem @select="exportReport('md')"
+                    >Markdown · 编辑与分享</DropdownMenuItem
+                  ><DropdownMenuItem @select="exportReport('json')"
+                    >JSON · 完整结构数据</DropdownMenuItem
+                  ></DropdownMenuContent
+                ></DropdownMenu
               >
             </div>
           </div>
+          <details v-if="detail.Warnings.length" class="package-warnings">
+            <summary>方案提示 · {{ detail.Warnings.length }}</summary>
+            <p v-for="warning in detail.Warnings" :key="warning">
+              {{ warning }}
+            </p>
+          </details>
           <div v-if="detail.Task.LastError" class="run-error">
             {{ detail.Task.LastError }}
           </div>
@@ -404,7 +443,10 @@ const resultLabel = (c: RfcAuditCheck) =>
             </article>
           </div>
           <footer class="float-footer">
-            <span>点击检查项定位原文 · 拖动顶部移动面板</span>
+            <span>点击检查项定位原文 · 拖动顶部移动面板</span
+            ><span v-if="detail.Task.DurationMs">
+              · 累计 {{ Math.ceil(detail.Task.DurationMs / 60000) }} 分钟</span
+            >
             <details v-if="detail.Task.Usage">
               <summary>Token 用量</summary>
               <span

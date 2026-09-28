@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, ref, computed, watch, onBeforeUnmount } from "vue";
 import { notify, confirmAction } from "@/lib/feedback";
 
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,10 @@ import {
   EyeOff,
   ChevronRight,
 } from "lucide-vue-next";
-const showKey = ref(false);
+const showKey = ref(false),
+  baseline = ref(""),
+  testResult = ref<{ message: string; latencyMs: number; note: string }>(),
+  testError = ref("");
 
 import { api, save } from "../api";
 import type { ModelSettings } from "../types/rfcAudit";
@@ -28,15 +31,19 @@ const model = ref<ModelSettings>(),
 onMounted(async () => {
   try {
     model.value = await api("/model");
+    baseline.value = JSON.stringify(model.value);
   } catch (e: any) {
     error.value = e.message;
   }
 });
 async function submit(clearKey = false) {
-  if (!model.value) return;
+  if (!model.value || busy.value || testing.value) return;
   busy.value = true;
   try {
     model.value = await save("/model", { ...model.value, clearKey });
+    baseline.value = JSON.stringify(model.value);
+    testResult.value = undefined;
+    testError.value = "";
     notify.success(
       clearKey ? "已清除 API Key" : "模型配置已保存，下次启动审核时生效",
     );
@@ -57,16 +64,55 @@ async function clear() {
   } catch {}
 }
 async function test() {
+  if (busy.value || testing.value) return;
   testing.value = true;
   try {
-    const result = await api("/model/test", { method: "POST" });
-    notify.success(result.message);
+    testError.value = "";
+    testResult.value = undefined;
+    const result = await save("/model/test", model.value, "POST");
+    testResult.value = result;
+    notify.success(`${result.message} · ${result.latencyMs} ms`);
   } catch (e: any) {
-    notify.error({ message: e.message, duration: 8000 });
+    testError.value = e.message;
   } finally {
     testing.value = false;
   }
 }
+const dirty = computed(
+  () => !!model.value && baseline.value !== JSON.stringify(model.value),
+);
+async function mayLeave() {
+  if (busy.value || testing.value) {
+    notify.warning("请等待当前操作完成");
+    return false;
+  }
+  if (!dirty.value) return true;
+  try {
+    await confirmAction("模型设置还未保存，是否放弃修改？", "未保存的配置", {
+      confirmButtonText: "放弃修改",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+const beforeUnload = (event: BeforeUnloadEvent) => {
+  if (dirty.value) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+};
+window.addEventListener("beforeunload", beforeUnload);
+onBeforeUnmount(() => window.removeEventListener("beforeunload", beforeUnload));
+watch(
+  model,
+  () => {
+    testResult.value = undefined;
+    testError.value = "";
+  },
+  { deep: true },
+);
+defineExpose({ mayLeave });
 </script>
 <template>
   <section class="page settings-page">
@@ -87,6 +133,7 @@ async function test() {
       novalidate
       @submit.prevent="submit(false)"
     >
+      <fieldset :disabled="busy || testing" class="contents">
       <div class="settings-section">
         <div class="section-intro">
           <Plug :size="20" />
@@ -255,18 +302,29 @@ async function test() {
           </details>
         </div>
       </div>
+      <div v-if="testResult" class="connection-result" role="status">
+        <b>{{ testResult.message }} · {{ testResult.latencyMs }} ms</b>
+        <p>{{ testResult.note }} 此次测试没有保存配置。</p>
+      </div>
+      <div v-if="testError" class="error-banner" role="alert">
+        {{ testError }}
+      </div>
       <div class="form-actions">
-        <span class="muted">保存后对新启动的审核生效</span>
+        <span class="muted">{{
+          dirty ? "有未保存的修改" : "保存后对新启动的审核生效"
+        }}</span>
         <div class="actions">
           <Button
             type="button"
             variant="outline"
-            :disabled="testing || !model.hasApiKey || busy"
+            :disabled="
+              testing || !(model.apiKey?.trim() || model.hasApiKey) || busy
+            "
             @click="test"
             ><LoaderCircle v-if="testing" class="animate-spin" /><Plug
               v-else
-            />测试已保存的连接</Button
-          ><Button type="submit" :disabled="busy"
+            />测试当前连接</Button
+          ><Button type="submit" :disabled="busy || testing"
             ><LoaderCircle v-if="busy" class="animate-spin" /><Check
               v-else
             />保存配置</Button
@@ -276,6 +334,7 @@ async function test() {
       <p class="storage-note">
         数据位置 <code>{{ directory }}</code>
       </p>
+      </fieldset>
     </form>
     <div v-else-if="!error" class="empty-state">
       <LoaderCircle class="animate-spin" />

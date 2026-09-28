@@ -65,6 +65,7 @@ export interface TaskRecord {
   CreatedAt: string;
   UpdatedAt: string;
   Attempt: number;
+  DurationMs?: number;
   LastError: string;
   Checklist: TaskCheck[];
   Documents: { Path: string; Size: number; ContentType: string }[];
@@ -279,7 +280,12 @@ export function validateGroup(value: any, existingId?: string): RuleGroup {
 
 export function validateModel(value: any): ModelSettings {
   if (!value || typeof value !== "object") throw new Error("模型配置无效");
-  const url = new URL(String(value.baseUrl || ""));
+  let url: URL;
+  try {
+    url = new URL(String(value.baseUrl || "").trim());
+  } catch {
+    throw new Error("请输入完整的 API 地址，例如 https://api.example.com/v1");
+  }
   if (
     !["http:", "https:"].includes(url.protocol) ||
     url.username ||

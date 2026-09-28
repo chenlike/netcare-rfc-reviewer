@@ -13,6 +13,7 @@ import {
   ArrowUpRight,
   LoaderCircle,
   Command,
+  Database,
 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,6 +31,7 @@ import { bootstrap } from "./api";
 import TaskList from "./pages/TaskList.vue";
 import RuleSettings from "./pages/RuleSettings.vue";
 import ModelSettings from "./pages/ModelSettings.vue";
+import WorkspaceSettings from "./pages/WorkspaceSettings.vue";
 const page = ref("tasks"),
   ready = ref(false),
   error = ref(""),
@@ -37,10 +39,14 @@ const page = ref("tasks"),
   desktop = ref(false),
   compact = ref(false);
 const ruleEditor = ref<InstanceType<typeof RuleSettings>>();
+const modelEditor = ref<InstanceType<typeof ModelSettings>>(),
+  taskEditor = ref<InstanceType<typeof TaskList>>(),
+  workspaceEditor = ref<InstanceType<typeof WorkspaceSettings>>();
 const navigation = [
   { id: "tasks", label: "方案审核", icon: FileCheck2 },
   { id: "rules", label: "审核规则", icon: ListChecks },
   { id: "model", label: "模型设置", icon: Settings2 },
+  { id: "workspace", label: "数据与帮助", icon: Database },
 ];
 const themes = [
   { id: "light", label: "浅色", icon: Sun },
@@ -53,6 +59,24 @@ async function navigate(next: string) {
     page.value === "rules" &&
     ruleEditor.value &&
     !(await ruleEditor.value.mayLeave())
+  )
+    return;
+  if (
+    page.value === "model" &&
+    modelEditor.value &&
+    !(await modelEditor.value.mayLeave())
+  )
+    return;
+  if (
+    page.value === "tasks" &&
+    taskEditor.value &&
+    !taskEditor.value.mayLeave()
+  )
+    return;
+  if (
+    page.value === "workspace" &&
+    workspaceEditor.value &&
+    !workspaceEditor.value.mayLeave()
   )
     return;
   page.value = next;
@@ -144,7 +168,7 @@ onMounted(init);
         >
         <div v-if="!compact" class="sidebar-foot" :title="directory">
           <span>{{ desktop ? "桌面版" : "本地运行" }}</span
-          ><span>v1.0.0</span>
+          ><span>v1.1.0</span>
         </div>
       </div>
     </aside>
@@ -155,10 +179,12 @@ onMounted(init);
         <Button @click="init">重新连接</Button>
       </div>
       <template v-else-if="ready"
-        ><TaskList v-if="page === 'tasks'" @navigate="navigate" /><RuleSettings
+        ><TaskList
+          v-if="page === 'tasks'"
+          ref="taskEditor"
+          @navigate="navigate" /><RuleSettings
           v-else-if="page === 'rules'"
-          ref="ruleEditor" /><ModelSettings v-else :directory="directory"
-      /></template>
+          ref="ruleEditor" /><ModelSettings v-else-if="page === 'model'" ref="modelEditor" :directory="directory" /><WorkspaceSettings v-else ref="workspaceEditor" /></template>
       <div v-else class="empty-state">
         <LoaderCircle class="animate-spin" />
         <p>正在打开工作空间…</p>

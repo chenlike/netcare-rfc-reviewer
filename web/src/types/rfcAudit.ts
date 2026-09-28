@@ -40,6 +40,7 @@ export interface Task {
   CreatedAt: string;
   UpdatedAt: string;
   LastError: string;
+  DurationMs?: number;
   TotalCount: number;
   CompletedCount: number;
   FailedCount: number;
