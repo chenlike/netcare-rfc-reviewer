@@ -27,7 +27,7 @@ jobs:
         include:
           - platform: windows-x64
             os: windows-2022
-            args: --no-bundle
+            args: --bundles nsis
           - platform: macos-arm64
             os: macos-15
             args: --bundles app
@@ -63,12 +63,16 @@ jobs:
         run: npm run desktop:build -- ${{ matrix.args }}
       - name: Verify runtime and create portable ZIP
         run: npm run desktop:portable
+      - name: Package Windows installer or standalone macOS app DMG
+        run: node ../.release-tools/scripts/distributions.mjs .
       - uses: actions/upload-artifact@v4
         with:
           name: portable-${{ matrix.platform }}
           path: |
             source/release/*.zip
-            source/release/*.zip.sha256
+            source/release/*.exe
+            source/release/*.dmg
+            source/release/*.sha256
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
@@ -96,5 +100,5 @@ jobs:
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" --verify-tag --draft --title "Netcare RFC方案审核工具 $RELEASE_TAG" --notes "Windows x64 与 macOS Apple Silicon 绿色版。完整解压后运行，内置 Node.js。配置与审核数据保存在解压目录。macOS 为 ad-hoc 签名，首次打开可能需要在系统设置中允许；Windows 需要系统 WebView2 Runtime。"
           fi
-          gh release upload "$RELEASE_TAG" release/*.zip release/*.sha256 --clobber
+          gh release upload "$RELEASE_TAG" release/*.zip release/*.exe release/*.dmg release/*.sha256 --clobber
           gh release edit "$RELEASE_TAG" --draft=false

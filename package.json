@@ -17,7 +17,8 @@
     "desktop:build": "node scripts/desktop-build.mjs build",
     "desktop:dev": "node scripts/desktop-build.mjs dev",
     "desktop:smoke": "node scripts/desktop-smoke.mjs",
-    "desktop:portable": "node scripts/portable.mjs"
+    "desktop:portable": "node scripts/portable.mjs",
+    "desktop:distributions": "node scripts/distributions.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.87.0",

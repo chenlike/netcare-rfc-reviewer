@@ -12,6 +12,15 @@
 
 ## 使用绿色版
 
+每次发布同时提供四种附件：
+
+| 平台 | 独立分发包 | 绿色版 |
+| --- | --- | --- |
+| Windows x64 | `windows-x64-setup.exe`，双击安装，包含全部运行环境 | `windows-x64.zip`，完整解压后双击 EXE |
+| macOS ARM64 | `macos-arm64.dmg`，内含独立 `.app`，复制到可写文件夹后双击启动 | `macos-arm64.zip`，完整解压后双击 APP |
+
+`.app` 是目录结构，GitHub Assets 无法直接存放目录，因此独立 APP 通过 DMG 分发。配置依然保存在程序旁边，请勿直接从只读 DMG 内运行。Windows 安装 EXE 与 ZIP 内的启动 EXE 不同，后者需与 `runtime/` 一起保留，不能单独拷走。
+
 从 [GitHub Releases](https://github.com/chenlike/netcare-rfc-reviewer/releases) 下载对应 ZIP，**完整解压到用户可写的固定文件夹**：
 
 - Windows x64：双击 `Netcare RFC方案审核工具.exe`。需要 Windows 10/11 与 Microsoft Edge WebView2 Runtime（多数系统已有）；缺少时从微软官网下载运行时。
@@ -50,23 +59,25 @@
 npm ci
 npm run check
 # Windows
-npm run desktop:build -- --no-bundle
+npm run desktop:build -- --bundles nsis
 # macOS（在 Mac 执行）
 npm run desktop:build -- --bundles app
 # 验证最终运行时，生成 ZIP 与 SHA-256 校验文件
 npm run desktop:portable
+# 另生成 Windows 安装 EXE 或 macOS APP 的 DMG，保留绿色 ZIP
+npm run desktop:distributions
 ```
 
 产物位于 `release/Netcare-RFC-Reviewer-<版本>-windows-x64.zip` 或 `release/Netcare-RFC-Reviewer-<版本>-macos-arm64.zip`。生产依赖在各自架构上安装，包含 Node、SQLite、sharp、PDF 渲染组件；不包含用户数据和 API Key。
 
-`npm run desktop:prepare` 生成内置运行环境；之后 `npm run desktop:dev` 可调试桌面壳。桌面模式不读取 `.env`，地址和 Key 在程序内配置。Windows 原安装器仍可用 `npm run desktop:build` 构建，但 CI 仅发布绿色版。
+`npm run desktop:prepare` 生成内置运行环境；之后 `npm run desktop:dev` 可调试桌面壳。桌面模式不读取 `.env`，地址和 Key 在程序内配置。CI 同时发布独立分发包与绿色版。
 
 ### GitHub Actions 发布
 
 `.github/workflows/release.yml` 使用两台 GitHub 托管构建机：`windows-2022`（x64）和 `macos-15`（ARM64），不需要自行注册 runner。
 
 - 普通推送和 PR 不触发构建。手动 Run workflow 可验证构建，ZIP 存在 Actions artifacts（保留 14 天）。
-- 推送 `v<版本>` 标签（如 `v0.0.1`）：以标签作为发布版本，在构建目录同步 package.json、锁文件、Tauri、Rust、界面及诊断版本，无需预先手动改版本。两套构建均通过后，发布 ZIP 与 SHA-256 到该标签的 GitHub Release。
+- 推送 `v<版本>` 标签（如 `v0.0.1`）：以标签作为发布版本，在构建目录同步 package.json、锁文件、Tauri、Rust、界面及诊断版本，无需预先手动改版本。两套构建均通过后，将安装 EXE、包含 APP 的 DMG、两个绿色 ZIP 及各自的 SHA-256 发布到该标签的 GitHub Release。
 - 修复工作流后补发已有标签：在 main 的 Actions → Portable desktop release → Run workflow 中填写 `release_tag`（例如 `v0.0.1`）。使用该标签的源码和 main 上的发布工具，不移动标签；已有 Release 会补齐产物。只点击旧运行的 Re-run 会继续使用旧工作流。
 - 升级：退出程序，保留 `data/`、`logs/` 和 `webview/`，替换 exe + runtime（Windows）或 .app（macOS）。
 
