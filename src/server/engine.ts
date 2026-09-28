@@ -5,6 +5,7 @@ import { PiReviewer, type Reviewer } from "../agents/rfc-review/reviewer.js";
 import type { RfcReviewConfig } from "../agents/rfc-review/config.js";
 import { logPreview } from "../core/log-preview.js";
 import { Store, type ModelSettings } from "./store.js";
+import type { ReferenceMaterial } from '../agents/rfc-review/references.js';
 
 export interface Activity {
   Preview: string;
@@ -14,6 +15,17 @@ export interface Activity {
 /** 单机调度，任务状态和尝试编号共同阻止删除、取消后的迟到回调。 */
 export class Engine {
   readonly activity = new Map<string, Activity>();
+  readonly activityHistory = new Map<string, Activity[]>();
+  private recordActivity(id: string, value: Activity) {
+    this.activity.set(id, value);
+    const history = this.activityHistory.get(id) || [];
+    if (history.at(-1)?.Preview !== value.Preview || history.at(-1)?.Event !== value.Event)
+      history.push(value);
+    this.activityHistory.delete(id);
+    this.activityHistory.set(id, history.slice(-80));
+    if (this.activityHistory.size > 100)
+      this.activityHistory.delete(this.activityHistory.keys().next().value!);
+  }
   private readonly active = new Map<
     string,
     { controller: AbortController; promise: Promise<void> }
@@ -74,6 +86,7 @@ export class Engine {
     this.activity.delete(id);
   }
   remove(id: string) {
+    this.activityHistory.delete(id);
     this.active.get(id)?.controller.abort(new Error("任务已删除"));
     this.activity.delete(id);
     this.store.deleteTask(id);
@@ -98,6 +111,7 @@ export class Engine {
     const signal = controller.signal;
     const started = Date.now();
     const config: RfcReviewConfig = {
+      basePrompt: this.store.task(id)?.BasePrompt || model.basePrompt,
       runTimeoutMs: 1800000,
       maxModelCalls: 300,
       maxToolCalls: 600,
@@ -128,7 +142,7 @@ export class Engine {
         this.store.saveTask(task);
         return;
       }
-      this.activity.set(id, {
+      this.recordActivity(id, {
         Preview: "正在读取方案包",
         UpdatedAt: new Date().toISOString(),
         Event: "agent_start",
@@ -163,6 +177,7 @@ export class Engine {
           () => model.apiKey!,
         );
       await reviewer.review({
+        references: task.References?.length ? JSON.parse(await readFile(this.store.referencesPath(id), 'utf8')) as ReferenceMaterial[] : [],
         request: { TaskId: id, Title: task.Title, EntryPath: task.EntryPath },
         pkg,
         pending: task.Checklist.filter((item) => item.Status !== "completed"),
@@ -170,7 +185,7 @@ export class Engine {
         assertActive,
         reportActivity: (value) => {
           if (!signal.aborted && this.store.task(id)?.Status === "running")
-            this.activity.set(id, {
+            this.recordActivity(id, {
               Preview: logPreview(value.preview, [model.apiKey || ""]),
               UpdatedAt: new Date().toISOString(),
               Event: value.event,

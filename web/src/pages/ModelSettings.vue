@@ -4,6 +4,8 @@ import { notify, confirmAction } from "@/lib/feedback";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { DEFAULT_RFC_PROMPT } from '../../../src/agents/rfc-review/prompt';
 import { Switch } from "@/components/ui/switch";
 import SelectField from "@/components/SelectField.vue";
 import {
@@ -41,7 +43,7 @@ async function submit(clearKey = false) {
   if (!model.value || busy.value || testing.value) return;
   busy.value = true;
   try {
-    model.value = await save("/model", { ...model.value, clearKey });
+    model.value = await save("/model", { ...model.value, provider: "openai-compatible", clearKey });
     baseline.value = JSON.stringify(model.value);
     testResult.value = undefined;
     testError.value = "";
@@ -71,7 +73,7 @@ async function test() {
   try {
     testError.value = "";
     testResult.value = undefined;
-    const result = await save("/model/test", model.value, "POST");
+    const result = await save("/model/test", { ...model.value, provider: "openai-compatible" }, "POST");
     testResult.value = result;
     notify.success(`${result.message} · ${result.latencyMs} ms`);
   } catch (e: any) {
@@ -164,15 +166,8 @@ defineExpose({ mayLeave });
               />
             </div>
             <div class="field">
-              <label>接口类型</label
-              ><SelectField
-                v-model="model.provider"
-                label="接口类型"
-                :options="[
-                  { value: 'deepseek', label: 'DeepSeek' },
-                  { value: 'openai-compatible', label: 'OpenAI 兼容' },
-                ]"
-              />
+              <label for="model-api-type">接口类型</label>
+              <Input id="model-api-type" model-value="OpenAI 兼容接口" readonly />
             </div>
           </div>
           <div class="field">
@@ -189,9 +184,10 @@ defineExpose({ mayLeave });
                 :type="showKey ? 'text' : 'password'"
                 autocomplete="new-password"
                 :placeholder="
-                  model.hasApiKey ? '留空保留已保存的 Key' : '输入你的 API Key'
+                  model.hasApiKey ? '****************' : '输入你的 API Key'
                 "
               /><Button
+                v-if="model.apiKey"
                 type="button"
                 variant="ghost"
                 size="icon-sm"
@@ -201,7 +197,7 @@ defineExpose({ mayLeave });
               /></Button>
             </div>
             <p class="field-hint">
-              <KeyRound :size="12" />Key 加密存储，不会回传。<button
+              <KeyRound :size="12" />{{ model.hasApiKey ? '已保存并加密；输入新 Key 可替换，留空保留原 Key。' : 'Key 加密存储，不会回传。' }}<button
                 v-if="model.hasApiKey"
                 type="button"
                 class="text-button danger"
@@ -292,6 +288,15 @@ defineExpose({ mayLeave });
               </div>
             </div>
           </details>
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="section-intro"><SlidersHorizontal :size="20" /><h2>基础审核 Prompt</h2><p>定义 Agent 的审核方式与输出风格。</p></div>
+        <div class="card form-card">
+          <label for="base-prompt">审核指令</label>
+          <Textarea id="base-prompt" v-model="model.basePrompt" :rows="12" maxlength="20000" class="font-mono text-xs leading-relaxed" />
+          <div class="actions justify-between"><small class="muted">{{ model.basePrompt?.length || 0 }} / 20000 字</small><Button type="button" variant="ghost" size="sm" @click="model.basePrompt = DEFAULT_RFC_PROMPT">恢复默认 Prompt</Button></div>
+          <p class="field-hint">保存后用于新任务，并随任务冻结；已有任务继续时沿用原指令。留空使用默认值。工具的证据校验和逐项提交约束仍然生效，配置导出也包含此项。</p>
         </div>
       </div>
       <div v-if="testResult" class="connection-result" role="status">

@@ -5,14 +5,16 @@ import { once } from "node:events";
 import os from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
+import { pathToFileURL } from "node:url";
 const root = path.resolve(import.meta.dirname, ".."),
-  runtime = path.join(root, "src-tauri/runtime");
+  runtime = process.argv[2] ? path.resolve(process.argv[2]) : path.join(root, "src-tauri/runtime");
+const node = path.join(runtime, process.platform === "win32" ? "node.exe" : "node");
 const directory = await mkdtemp(path.join(os.tmpdir(), "rfc-packaged-smoke-"));
 const secret = "packaged-test-secret-not-real-".repeat(3);
 let current;
 async function boot() {
   const child = spawn(
-    path.join(runtime, "node.exe"),
+    node,
     [path.join(runtime, "dist/server/index.js")],
     {
       cwd: os.tmpdir(),
@@ -69,7 +71,8 @@ try {
     "X-Studio-Token": first.token,
   };
   let groups = await (await first.request("/api/groups")).json();
-  assert.equal(groups.length, 0);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].rules.length, 24);
   const group = await (
     await first.request("/api/groups", {
       method: "POST",
@@ -93,16 +96,17 @@ try {
   await assert.rejects(access(path.join(directory, "instance.lock")));
   const second = await boot();
   groups = await (await second.request("/api/groups")).json();
-  assert.equal(groups[0].id, group.id);
+  assert.ok(groups.some(item => item.id === group.id));
+  assert.equal(groups.length, 2);
   second.child.stdin.end();
   assert.equal((await second.exit)[0], 0);
   // 导入内置 sharp/SQLite 和实际 ZIP 解析器，验证原生依赖均随包分发。
   const verify = spawn(
-    path.join(runtime, "node.exe"),
+    node,
     [
       "--input-type=module",
       "-e",
-      `import {parsePackage,getImage} from ${JSON.stringify(new URL("../src-tauri/runtime/dist/agents/rfc-review/document.js", import.meta.url).href)};import {readFile} from 'node:fs/promises';const pkg=await parsePackage(await readFile(${JSON.stringify(path.join(root, "examples/sample-rfc.zip"))}));if(pkg.images.length!==1)throw Error('missing image');await getImage(pkg,pkg.images[0].id);console.log('packaged parser and sharp verified');`,
+      `import {parsePackage,getImage} from ${JSON.stringify(pathToFileURL(path.join(runtime, "dist/agents/rfc-review/document.js")).href)};import {prepareReference,referenceImage} from ${JSON.stringify(pathToFileURL(path.join(runtime, "dist/agents/rfc-review/references.js")).href)};import {readFile} from 'node:fs/promises';const pkg=await parsePackage(await readFile(${JSON.stringify(path.join(root, "examples/sample-rfc.zip"))}));if(pkg.images.length!==1)throw Error('missing image');await getImage(pkg,pkg.images[0].id);for(const ext of ['pdf','docx']){const ref=await prepareReference(await readFile(${JSON.stringify(path.join(root, "examples/reference-sample."))}+ext),'manual.'+ext,'R1');if(!ref.Text.join('').includes('8.6.1'))throw Error('reference text missing');if(ext==='pdf')await referenceImage(ref,1);}console.log('packaged ZIP, PDF rendering, DOCX and sharp verified');`,
     ],
     {
       cwd: os.tmpdir(),
@@ -116,7 +120,7 @@ try {
   verify.stderr.on("data", (b) => (output += b));
   assert.equal((await once(verify, "exit"))[0], 0, output);
   console.log(
-    "PASS: packaged Node with empty PATH; private session; built UI assets; settings persistence; graceful exit; ZIP/image native dependencies.",
+    "PASS: packaged Node with empty PATH; private session; built UI assets; settings persistence; graceful exit; ZIP/PDF/DOCX/image native dependencies.",
   );
 } finally {
   if (current && current.exitCode === null) {

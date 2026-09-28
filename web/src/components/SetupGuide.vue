@@ -8,7 +8,7 @@ const emit = defineEmits<{ start: []; pause: []; navigate: [page: string]; finis
 const step = computed(() => !props.modelReady ? 1 : !props.rulesReady ? 2 : 3);
 const steps = computed(() => [
   { title: "连接模型", description: "填写 API 地址、模型名与自己的 Key，测试连接后保存。", icon: Plug, done: props.modelReady, page: "model" },
-  { title: "设置审核规则", description: "新建规则组或导入 JSON，至少启用一条检查规则并保存。", icon: ListChecks, done: props.rulesReady, page: "rules" },
+  { title: "设置审核规则", description: "选用 RFC 预置规则，也可新建或导入 JSON；核对后保存。", icon: ListChecks, done: props.rulesReady, page: "rules" },
   { title: "上传第一份方案", description: "选择包含 HTML、样式和图片的 ZIP，开始逐项审核。", icon: FileArchive, done: false, page: "tasks" },
 ]);
 function next() {

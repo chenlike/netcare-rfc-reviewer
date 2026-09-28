@@ -10,6 +10,7 @@ export interface RfcReadingConfig {
 
 /** 领域配置不进入通用执行核心，其他 Agent 类型无需读取这些选项。 */
 export interface RfcReviewConfig extends AgentConfig {
+  basePrompt?: string;
   rfcReading?: Partial<RfcReadingConfig>;
 }
 

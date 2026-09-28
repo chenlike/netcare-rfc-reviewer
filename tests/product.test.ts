@@ -84,7 +84,15 @@ test("first-run guidance requires saved model and enabled rules, persists across
   });
   const base = `http://127.0.0.1:${(app.server.address() as any).port}`;
   const initial: any = await (await fetch(base + "/api/bootstrap")).json();
-  assert.deepEqual(initial.onboarding, { completed: false, modelReady: false, rulesReady: false });
+  assert.deepEqual(initial.onboarding, { completed: false, seen: false, modelReady: false, rulesReady: false });
+  assert.equal((await fetch(base + "/api/onboarding/seen", { method: "POST" })).status, 403);
+  const seen = await fetch(base + "/api/onboarding/seen", { method: "POST", headers: { "X-Studio-Token": initial.token } });
+  assert.equal((await seen.json()).seen, true);
+  const seenStore = new Store(s.directory);
+  try {
+    assert.equal(seenStore.onboarding().seen, true);
+    assert.equal(seenStore.onboarding().completed, false);
+  } finally { seenStore.close(); }
   assert.equal((await fetch(base + "/api/onboarding/complete", { method: "POST" })).status, 403);
   const complete = () => fetch(base + "/api/onboarding/complete", { method: "POST", headers: { "X-Studio-Token": initial.token } });
   assert.equal((await complete()).status, 400);
@@ -95,7 +103,7 @@ test("first-run guidance requires saved model and enabled rules, persists across
   s.saveGroup(group);
   const response = await complete();
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { completed: true, modelReady: true, rulesReady: true });
+  assert.deepEqual(await response.json(), { completed: true, seen: true, modelReady: true, rulesReady: true });
   s.savePreferences({ theme: "dark" });
   const reopened = new Store(s.directory);
   try {
@@ -103,7 +111,7 @@ test("first-run guidance requires saved model and enabled rules, persists across
     assert.equal(reopened.preferences().theme, "dark");
   } finally { reopened.close(); }
   s.saveModel(DEFAULT_MODEL, true);
-  assert.deepEqual(s.onboarding(), { completed: true, modelReady: false, rulesReady: true });
+  assert.deepEqual(s.onboarding(), { completed: true, seen: true, modelReady: false, rulesReady: true });
 });
 test("portable backup restores rules, packages and stopped tasks without keys or automatic execution", async (t) => {
   const source = await store(t),

@@ -20,6 +20,7 @@ import {
 
 import { api, save, downloadJson } from "../api";
 import type { Rule, RuleGroup } from "../types/rfcAudit";
+import preset from "../../../presets/rfc-standard.json";
 const emit = defineEmits<{ changed: [] }>();
 const groups = ref<RuleGroup[]>([]),
   draft = ref<RuleGroup>(),
@@ -85,6 +86,12 @@ async function submit() {
     busy.value = false;
   }
 }
+async function usePreset() {
+  if (!(await mayLeave())) return;
+  draft.value = { id: "", name: preset.name, rules: structuredClone(preset.rules), updatedAt: "" };
+  dirty.value = true;
+  notify.success("已载入 24 项 RFC 预置规则，请核对后保存为自己的规则组");
+}
 async function remove() {
   if (!draft.value?.id) return;
   try {
@@ -143,6 +150,7 @@ defineExpose({ mayLeave });
         <p>把经验变成标准，让每一次审核都有章可循。</p>
       </div>
       <div class="actions">
+        <Button variant="outline" @click="usePreset"><ListChecks />使用 RFC 预置规则</Button>
         <Button variant="outline" @click="importInput?.click()"
           ><Upload />导入 JSON</Button
         ><Button @click="add"><Plus />新建规则组</Button>
@@ -196,7 +204,7 @@ defineExpose({ mayLeave });
               variant="ghost"
               size="icon-sm"
               aria-label="导出规则组"
-              @click="downloadJson(draft, draft.name + '.json')"
+              @click="downloadJson(draft, draft.name + '.json').catch(e => notify.error(e.message))"
               ><Download /></Button
             ><Button
               v-if="draft.id"
@@ -251,12 +259,16 @@ defineExpose({ mayLeave });
             placeholder="描述检查标准，以及应当核验的证据…"
             @input="dirty = true"
           />
+          <p v-if="rule.Title.includes('2个运行高峰期') && rule.Description.includes('一个运行高峰期')" class="field-hint">
+            待核对：原标题要求 2 个运行高峰期，正文要求 1 个且大于 48 小时。已保留原文，请按实际标准统一后保存。
+          </p>
           <div class="rule-meta">
             <SelectField
               v-model="rule.Level"
               label="规则等级"
               :options="[
                 { value: '必要', label: '必要' },
+                { value: '重要', label: '重要' },
                 { value: '建议', label: '建议' },
               ]"
               @update:model-value="dirty = true"
@@ -283,8 +295,8 @@ defineExpose({ mayLeave });
           <ListChecks :size="28" :stroke-width="1.4" />
         </div>
         <h2>好的审核，从清晰的规则开始</h2>
-        <p>选择左侧规则组，或为一个新场景创建审核标准。</p>
-        <Button variant="outline" @click="add"><Plus />创建规则组</Button>
+        <p>可以从 24 项 RFC 预置规则开始，再按实际业务调整。</p>
+        <div class="actions"><Button @click="usePreset"><ListChecks />使用 RFC 预置规则</Button><Button variant="outline" @click="add"><Plus />创建规则组</Button></div>
       </div>
     </div>
   </section>

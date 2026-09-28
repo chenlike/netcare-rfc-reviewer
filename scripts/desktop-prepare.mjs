@@ -1,11 +1,13 @@
-import { cp, mkdir, readFile, writeFile, rm, copyFile } from "node:fs/promises";
+import { cp, mkdir, readFile, writeFile, rm, copyFile, chmod, access } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import sharp from "sharp";
 const root = path.resolve(import.meta.dirname, "..");
 const destination = path.join(root, "src-tauri/runtime");
-if (process.platform !== "win32" || process.arch !== "x64")
-  throw new Error("当前桌面构建面向 Windows x64，请在对应环境构建");
+const windows = process.platform === "win32" && process.arch === "x64";
+const mac = process.platform === "darwin" && process.arch === "arm64";
+if (!windows && !mac)
+  throw new Error("请使用 Windows x64 或 macOS ARM64 原生环境构建");
 if (Number(process.versions.node.split(".")[0]) < 22)
   throw new Error("构建需要 Node.js 22.19+");
 // 只清理固定的生成目录，永不接触用户的数据目录。
@@ -16,11 +18,25 @@ await mkdir(destination, { recursive: true });
 await cp(path.join(root, "dist"), path.join(destination, "dist"), {
   recursive: true,
 });
-await copyFile(process.execPath, path.join(destination, "node.exe"));
-await copyFile(
+await cp(path.join(root, "presets"), path.join(destination, "presets"), { recursive: true });
+const bundledNode = path.join(destination, windows ? "node.exe" : "node");
+await copyFile(process.execPath, bundledNode);
+if (mac) await chmod(bundledNode, 0o755);
+const licenseCandidates = [
   path.join(path.dirname(process.execPath), "LICENSE"),
-  path.join(destination, "NODE-LICENSE.txt"),
-);
+  path.resolve(path.dirname(process.execPath), "../LICENSE"),
+  path.resolve(path.dirname(process.execPath), "../share/doc/node/LICENSE"),
+];
+let nodeLicense;
+for (const candidate of licenseCandidates) {
+  try { await access(candidate); nodeLicense = await readFile(candidate); break; } catch {}
+}
+if (!nodeLicense) {
+  const response = await fetch(`https://nodejs.org/dist/${process.version}/LICENSE`);
+  if (!response.ok) throw new Error(`无法取得 Node ${process.version} 的 LICENSE：${response.status}`);
+  nodeLicense = Buffer.from(await response.arrayBuffer());
+}
+await writeFile(path.join(destination, "NODE-LICENSE.txt"), nodeLicense);
 await copyFile(
   path.join(root, "package.json"),
   path.join(destination, "package.json"),
@@ -30,9 +46,15 @@ await copyFile(
   path.join(destination, "package-lock.json"),
 );
 await copyFile(path.join(root,'THIRD-PARTY-NOTICES.md'),path.join(destination,'THIRD-PARTY-NOTICES.md'));
-const npm =
-  process.env.npm_execpath ||
-  path.join(path.dirname(process.execPath), "node_modules/npm/bin/npm-cli.js");
+const npmCandidates = [process.env.npm_execpath,
+  path.join(path.dirname(process.execPath), "node_modules/npm/bin/npm-cli.js"),
+  path.resolve(path.dirname(process.execPath), "../lib/node_modules/npm/bin/npm-cli.js"),
+].filter(Boolean);
+let npm;
+for (const candidate of npmCandidates) {
+  try { await access(candidate); npm = candidate; break; } catch {}
+}
+if (!npm) throw new Error("找不到当前 Node 附带的 npm-cli.js");
 execFileSync(
   process.execPath,
   [npm, "ci", "--omit=dev", "--no-audit", "--no-fund"],
@@ -65,6 +87,12 @@ await writeFile(
   Buffer.concat([header, png]),
 );
 await writeFile(path.join(root, "src-tauri/icons/icon.png"), png);
+const icns = Buffer.alloc(16);
+icns.write("icns", 0);
+icns.writeUInt32BE(16 + png.length, 4);
+icns.write("ic08", 8);
+icns.writeUInt32BE(8 + png.length, 12);
+await writeFile(path.join(root, "src-tauri/icons/icon.icns"), Buffer.concat([icns, png]));
 console.log(
   "桌面运行环境已生成：自带 Node.js、审核服务及前端，不包含用户数据或 Key。",
 );

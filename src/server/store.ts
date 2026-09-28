@@ -7,6 +7,8 @@ import {
 } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
+import { DEFAULT_RFC_PROMPT } from '../agents/rfc-review/prompt.js';
+import type { ReferenceInfo } from '../agents/rfc-review/references.js';
 import type {
   ChecklistItem,
   ReviewResult,
@@ -22,6 +24,7 @@ export interface RuleGroup {
   updatedAt: string;
 }
 export interface ModelSettings {
+  basePrompt?: string;
   baseUrl: string;
   model: string;
   apiKey?: string;
@@ -36,6 +39,7 @@ export interface ModelSettings {
   requestTimeoutMs: number;
 }
 export const DEFAULT_MODEL: ModelSettings = {
+  basePrompt: DEFAULT_RFC_PROMPT,
   baseUrl: "https://api.deepseek.com",
   model: "deepseek-v4-flash",
   provider: "deepseek",
@@ -57,6 +61,8 @@ export interface TaskCheck extends ChecklistItem {
   Quote?: string;
 }
 export interface TaskRecord {
+  References?: ReferenceInfo[];
+  BasePrompt?: string;
   Id: string;
   Title: string;
   GroupName: string;
@@ -134,6 +140,7 @@ export class Store {
     const completed = this.db.prepare("SELECT value FROM settings WHERE id=?").get("onboardingCompleted");
     return {
       completed: completed?.value === "true",
+      seen: completed?.value === "true" || this.db.prepare("SELECT value FROM settings WHERE id=?").get("onboardingSeen")?.value === "true",
       modelReady: this.model().hasApiKey === true,
       rulesReady: this.groups().some((group) => group.rules.some((rule) => rule.enabled)),
     };
@@ -144,6 +151,11 @@ export class Store {
       throw new Error("请先保存模型连接，并配置至少一条启用的审核规则");
     this.db.prepare("INSERT INTO settings VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value")
       .run("onboardingCompleted", "true");
+    return this.onboarding();
+  }
+  markOnboardingSeen() {
+    this.db.prepare("INSERT INTO settings VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value")
+      .run("onboardingSeen", "true");
     return this.onboarding();
   }
   model(secret = false): ModelSettings {
@@ -223,6 +235,7 @@ export class Store {
     if (!/^[a-f0-9-]{36}$/i.test(id)) throw new Error("任务编号无效");
     return path.join(this.directory, "packages", `${id}.zip`);
   }
+  referencesPath(id: string) { return this.packagePath(id).replace(/\.zip$/, '.references.json'); }
   submit(id: string, attempt: number, result: ReviewResult) {
     const task = this.task(id);
     if (!task || task.Status !== "running" || task.Attempt !== attempt)
@@ -296,6 +309,8 @@ export function validateGroup(value: any, existingId?: string): RuleGroup {
 
 export function validateModel(value: any): ModelSettings {
   if (!value || typeof value !== "object") throw new Error("模型配置无效");
+  if (value.basePrompt !== undefined && (typeof value.basePrompt !== 'string' || value.basePrompt.length > 20000))
+    throw new Error('基础审核 Prompt 最多 20000 字');
   let url: URL;
   try {
     url = new URL(String(value.baseUrl || "").trim());
@@ -351,6 +366,7 @@ export function validateModel(value: any): ModelSettings {
       .replace(/\/$/, "")
       .replace(/\/chat\/completions$/, ""),
     model: value.model.trim(),
+    basePrompt: value.basePrompt?.trim() || DEFAULT_RFC_PROMPT,
     provider:
       url.hostname === "api.deepseek.com" || value.provider === "deepseek"
         ? "deepseek"

@@ -13,6 +13,12 @@ use std::{
     time::Duration,
 };
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::webview::DownloadEvent;
+
+fn download_status(webview: &tauri::Webview, url: &str, status: &str) {
+    let payload = serde_json::json!({ "url": url, "status": status });
+    let _ = webview.eval(&format!("window.dispatchEvent(new CustomEvent('netcare-download', {{detail:{payload}}}))"));
+}
 
 #[derive(Default)]
 struct Runtime {
@@ -65,13 +71,20 @@ fn startup_error(message: &str) {
 }
 fn install_directory() -> Result<PathBuf, Box<dyn std::error::Error>> {
     let executable = std::env::current_exe()?;
-    let directory = executable.parent().ok_or("无法定位程序安装目录")?.to_path_buf();
+    let directory = portable_directory(&executable)?;
     let probe = directory.join(format!(".netcare-write-check-{}", uuid::Uuid::new_v4().simple()));
     let file = OpenOptions::new().create_new(true).write(true).open(&probe)
-        .map_err(|error| format!("安装目录不可写：{}\n请将软件安装到当前用户有写入权限的目录，例如 D:\\Netcare。\n不会改用 C 盘用户目录。\n{error}", directory.display()))?;
+        .map_err(|error| format!("程序目录不可写：{}\n请先完整解压到当前用户可写的文件夹，再启动程序。macOS 请将解压后的整个文件夹移动到固定位置后打开。\n配置不会改存到其他目录。\n{error}", directory.display()))?;
     drop(file);
     fs::remove_file(probe)?;
     Ok(directory)
+}
+fn portable_directory(executable: &std::path::Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    #[cfg(target_os = "macos")]
+    if let Some(bundle) = executable.ancestors().find(|p| p.extension().is_some_and(|ext| ext == "app")) {
+        return Ok(bundle.parent().ok_or("无法定位应用所在目录")?.to_path_buf());
+    }
+    Ok(executable.parent().ok_or("无法定位程序所在目录")?.to_path_buf())
 }
 fn start_runtime(
     app: tauri::AppHandle,
@@ -98,7 +111,7 @@ fn start_runtime(
         uuid::Uuid::new_v4().simple(),
         uuid::Uuid::new_v4().simple()
     );
-    let mut command = Command::new(root.join("node.exe"));
+    let mut command = Command::new(root.join(if cfg!(windows) { "node.exe" } else { "node" }));
     command
         .arg(root.join("dist/server/index.js"))
         .current_dir(&root)
@@ -175,6 +188,7 @@ fn main() {
             let install = install_directory()?;
             fs::create_dir_all(install.join("webview"))?;
             let nav_state = setup_state.clone();
+            let download_state = setup_state.clone();
             let window =
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                     .title("Netcare RFC方案审核工具")
@@ -184,10 +198,36 @@ fn main() {
                     .center()
                     .devtools(cfg!(debug_assertions))
                     .disable_drag_drop_handler()
+                    .initialization_script("window.__NETCARE_NATIVE_DOWNLOAD__ = true;")
+                    .on_download(move |webview, event| {
+                        match event {
+                            DownloadEvent::Requested { url, destination } => {
+                                let prefix = format!("blob:http://127.0.0.1:{}/", download_state.port.load(Ordering::SeqCst));
+                                if !url.as_str().starts_with(&prefix) {
+                                    download_status(&webview, url.as_str(), "failed");
+                                    return false;
+                                }
+                                download_status(&webview, url.as_str(), "started");
+                                let name = destination.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                                if let Some(file) = rfd::FileDialog::new().set_title("导出文件").set_file_name(&name).save_file() {
+                                    *destination = file;
+                                } else {
+                                    download_status(&webview, url.as_str(), "cancelled");
+                                    return false;
+                                }
+                            }
+                            DownloadEvent::Finished { url, success, .. } => {
+                                download_status(&webview, url.as_str(), if success { "saved" } else { "failed" });
+                            }
+                            _ => {}
+                        }
+                        true
+                    })
                     .on_navigation(move |url| {
                         url.scheme() == "tauri"
                             || url.host_str() == Some("tauri.localhost")
                             || url.as_str() == "about:srcdoc"
+                            || url.as_str().starts_with(&format!("blob:http://127.0.0.1:{}/", nav_state.port.load(Ordering::SeqCst)))
                             || (url.scheme() == "http"
                                 && url.host_str() == Some("127.0.0.1")
                                 && url.port() == Some(nav_state.port.load(Ordering::SeqCst)))

@@ -105,7 +105,7 @@ function safePath(name: string): string {
 }
 
 /** 按实际解压字节数限制内存，避免依赖可伪造的 ZIP 目录大小。 */
-async function readArchive(raw: Buffer): Promise<Map<string, Buffer>> {
+export async function readArchive(raw: Buffer): Promise<Map<string, Buffer>> {
   if (!raw.length || raw.length > MAX_ZIP) throw new Error('ZIP_SIZE_LIMIT')
   return new Promise((resolve, reject) => {
     yauzl.fromBuffer(raw, { lazyEntries: true, validateEntrySizes: true }, (error, zip) => {

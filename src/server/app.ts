@@ -17,6 +17,8 @@ import { Engine } from "./engine.js";
 import { desktopSession } from "./desktop-session.js";
 import { testModel } from "./model-test.js";
 import { report } from "./report.js";
+import { exportConfiguration, importConfiguration } from "./configuration.js";
+import { prepareReference, referenceInfo, REFERENCE_MAX_COUNT, REFERENCE_MAX_TOTAL, REFERENCE_MAX_TEXT, type ReferenceMaterial } from '../agents/rfc-review/references.js';
 import {
   exportWorkspace,
   importWorkspace,
@@ -38,7 +40,7 @@ async function body(req: http.IncomingMessage, maximum = 2 * 1024 * 1024) {
 async function json(req: http.IncomingMessage) {
   return JSON.parse((await body(req)).toString("utf8"));
 }
-const summary = ({ Checklist, Documents, Warnings, ...task }: TaskRecord) => ({
+const summary = ({ Checklist, Documents, Warnings, BasePrompt, ...task }: TaskRecord) => ({
   ...task,
   TotalCount: Checklist.length,
   CompletedCount: Checklist.filter((item) => item.Status === "completed")
@@ -96,6 +98,14 @@ export function createApp(
           mutation = true;
           activeWrites++;
         }
+        if (p === "/api/configuration/export" && req.method === "POST") {
+          const value = await json(req);
+          return send(exportConfiguration(store, value.includeKey === true));
+        }
+        if (p === "/api/configuration/import" && req.method === "POST") {
+          const value = JSON.parse((await body(req, 10 * 1024 * 1024)).toString('utf8'));
+          return send(importConfiguration(store, value));
+        }
         if (p === "/api/workspace" && req.method === "GET")
           return send(await workspaceInfo(store));
         if (p === "/api/diagnostics" && req.method === "GET") {
@@ -147,6 +157,8 @@ export function createApp(
           });
         if (p === "/api/onboarding" && req.method === "GET")
           return send(store.onboarding());
+        if (p === "/api/onboarding/seen" && req.method === "POST")
+          return send(store.markOnboardingSeen());
         if (p === "/api/onboarding/complete" && req.method === "POST")
           return send(store.completeOnboarding());
         if (p === "/api/preferences" && req.method === "PUT") {
@@ -232,8 +244,23 @@ export function createApp(
             const fileName = url.searchParams.get("fileName") || "方案.zip";
             if (!/\.zip$/i.test(fileName) || fileName.length > 500)
               throw new Error("请选择 ZIP 方案包");
-            const raw = await body(req, 50 * 1024 * 1024),
-              pkg = await parsePackage(raw);
+            let raw: Buffer;
+            const references: ReferenceMaterial[] = [];
+            if (req.headers['content-type']?.startsWith('multipart/form-data')) {
+              const bytes = await body(req, 102 * 1024 * 1024);
+              const form = await new Response(bytes, { headers: { 'Content-Type': req.headers['content-type'] } }).formData();
+              const main = form.get('file'), files = form.getAll('references');
+              if (!(main instanceof File) || main.size > 50 * 1024 * 1024) throw new Error('主方案最大 50 MB');
+              if (files.length > REFERENCE_MAX_COUNT || files.some(f => !(f instanceof File)) || files.reduce((n, f) => n + (f as File).size, 0) > REFERENCE_MAX_TOTAL)
+                throw new Error('参考资料最多 12 份，合计最大 50 MB');
+              raw = Buffer.from(await main.arrayBuffer());
+              for (const [index, file] of (files as File[]).entries()) {
+                try { references.push(await prepareReference(Buffer.from(await file.arrayBuffer()), file.name, `R${index + 1}`)); }
+                catch (e) { throw new Error(`参考资料「${file.name}」解析失败：${readableError(e)}`); }
+                if (references.reduce((n, item) => n + item.Text.join('').length, 0) > REFERENCE_MAX_TEXT) throw new Error('参考资料正文合计超过 400 万字，请精简资料');
+              }
+            } else raw = await body(req, 50 * 1024 * 1024);
+            const pkg = await parsePackage(raw);
             const assets = pkg.assets || [];
             if (
               assets.length > 2000 ||
@@ -248,6 +275,8 @@ export function createApp(
                 .basename(fileName.replaceAll("\\", "/"))
                 .replace(/\.zip$/i, ""),
               GroupName: group.name,
+              References: references.map(referenceInfo),
+              BasePrompt: store.model().basePrompt,
               Status: "queued",
               EntryPath:
                 pkg.documents.find((doc) =>
@@ -281,9 +310,11 @@ export function createApp(
               mode: 0o600,
             });
             try {
+              if (references.length) await writeFile(store.referencesPath(id), JSON.stringify(references), { flag: 'wx', mode: 0o600 });
               store.saveTask(task);
             } catch (error) {
               await unlink(store.packagePath(id));
+              await unlink(store.referencesPath(id)).catch(() => {});
               throw error;
             }
             engine.pump();
@@ -298,13 +329,22 @@ export function createApp(
           }
         }
         const taskMatch = p.match(
-          /^\/api\/tasks\/([a-f0-9-]+)(?:\/(download|report|cancel|retry))?$/,
+          /^\/api\/tasks\/([a-f0-9-]+)(?:\/(download|references|report|cancel|retry))?$/,
         );
         if (taskMatch) {
           const id = taskMatch[1]!,
             action = taskMatch[2],
             task = store.task(id);
           if (!task) return send({ error: "任务不存在" }, 404);
+          if (action === 'references' && req.method === 'GET') {
+            const referenceId = url.searchParams.get('id');
+            if (!task.References?.some(item => item.Id === referenceId)) return send({ error: '参考资料不存在' }, 404);
+            const materials: ReferenceMaterial[] = JSON.parse(await readFile(store.referencesPath(id), 'utf8'));
+            const item = materials.find(item => item.Id === referenceId)!;
+            res.setHeader('Content-Type', 'application/octet-stream');
+            res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(item.Name)}`);
+            return res.end(Buffer.from(item.Raw, 'base64'));
+          }
           if (action === "download" && req.method === "GET") {
             res.setHeader("Content-Type", "application/zip");
             res.setHeader(
@@ -362,6 +402,7 @@ export function createApp(
               Checklist: task.Checklist,
               Documents: task.Documents,
               Warnings: task.Warnings,
+              ActivityHistory: engine.activityHistory.get(id) || [],
               Activity:
                 task.Status === "running"
                   ? engine.activity.get(id) || null
@@ -370,6 +411,7 @@ export function createApp(
           if (!action && req.method === "DELETE") {
             engine.remove(id);
             await unlink(store.packagePath(id)).catch(() => {});
+            await unlink(store.referencesPath(id)).catch(() => {});
             return send({ ok: true });
           }
         }

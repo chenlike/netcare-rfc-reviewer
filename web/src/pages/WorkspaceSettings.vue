@@ -11,7 +11,9 @@ import {
   ShieldCheck,
 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
-import { api, downloadFile } from "@/api";
+import { api, downloadFile, downloadJson, save } from "@/api";
+import { Switch } from "@/components/ui/switch";
+import { initializeTheme } from "@/lib/theme";
 import { confirmAction, notify } from "@/lib/feedback";
 const info = ref<{
   version: string;
@@ -28,6 +30,42 @@ const info = ref<{
 const error = ref(""),
   busy = ref(""),
   restoreInput = ref<HTMLInputElement>();
+const configInput = ref<HTMLInputElement>(), includeKey = ref(false);
+const emit = defineEmits<{ changed: [] }>();
+async function exportConfig() {
+  if (busy.value) return;
+  busy.value = 'config-export';
+  error.value = '';
+  try {
+    const result = await save('/configuration/export', { includeKey: includeKey.value }, 'POST');
+    if (await downloadJson(result, `netcare-config-${new Date().toISOString().slice(0, 10)}.json`))
+      notify.success('配置已导出');
+  } catch (e: any) { error.value = e.message; }
+  finally { busy.value = ''; }
+}
+async function importConfig(event: Event) {
+  const input = event.target as HTMLInputElement, file = input.files?.[0];
+  input.value = '';
+  if (!file || busy.value) return;
+  busy.value = 'config-import';
+  error.value = '';
+  try {
+    if (file.size > 10 * 1024 * 1024) throw new Error('配置文件不能超过 10 MB');
+    const value = JSON.parse(await file.text());
+    if (value?.format !== 'netcare-rfc-configuration' || value.version !== 1 || !Array.isArray(value.groups))
+      throw new Error('请选择本工具导出的配置 JSON');
+    await confirmAction(
+      `将新增 ${value.groups.length} 个规则组，并替换模型连接、审核参数和主题。${value.model?.apiKey ? '文件中的 API Key 将替换当前 Key。' : '文件未携带 Key：相同 API 地址保留当前 Key，地址变更时清除旧 Key。'}已有审核记录不变，正在执行的任务继续使用原配置。`,
+      '导入配置', { confirmButtonText: '导入配置' },
+    );
+    const result = await save('/configuration/import', value, 'POST');
+    initializeTheme(result.preferences.theme);
+    emit('changed');
+    notify.success(`配置已导入，新增 ${result.groups} 个规则组${result.hasApiKey ? '' : '；请配置 API Key'}`);
+    await refresh();
+  } catch (e: any) { if (e instanceof Error) error.value = e.message; }
+  finally { busy.value = ''; }
+}
 const bytes = (value: number | null) =>
   value === null
     ? "无法读取"
@@ -48,11 +86,11 @@ async function download(kind: "backup" | "diagnostics") {
   busy.value = kind;
   error.value = "";
   try {
-    await downloadFile(
+    const saved = await downloadFile(
       `/${kind}`,
       `rfc-studio-${kind}-${new Date().toISOString().slice(0, 10)}.${kind === "backup" ? "zip" : "json"}`,
     );
-    notify.success(kind === "backup" ? "备份已导出" : "诊断信息已导出");
+    if (saved) notify.success(kind === "backup" ? "备份已导出" : "诊断信息已导出");
   } catch (e: any) {
     error.value = e.message;
   } finally {
@@ -142,6 +180,26 @@ defineExpose({ mayLeave });
       </div>
       <div class="settings-section">
         <div class="section-intro">
+          <ShieldCheck :size="20" />
+          <h2>配置导入导出</h2>
+          <p>迁移审核规则、API 连接和使用偏好。</p>
+        </div>
+        <div class="card form-card">
+          <p class="help-text">包含全部规则组、模型地址与名称、思考程度、审核参数和主题，不包含方案文件与审核记录。配置 JSON 最大 10 MB。</p>
+          <div class="switch-row">
+            <div><label for="export-api-key">导出时包含 API Key</label><p>开启后 Key 将以明文写入配置文件，请仅用于自己的设备迁移。</p></div>
+            <Switch id="export-api-key" v-model="includeKey" :disabled="!!busy" />
+          </div>
+          <div class="actions">
+            <Button variant="outline" :disabled="!!busy" @click="exportConfig"><LoaderCircle v-if="busy === 'config-export'" class="animate-spin" /><Download v-else />导出配置</Button>
+            <Button variant="outline" :disabled="!!busy" @click="configInput?.click()"><LoaderCircle v-if="busy === 'config-import'" class="animate-spin" /><Upload v-else />导入配置</Button>
+          </div>
+          <p class="field-hint">导入的规则作为新组添加，保留已有规则；模型与偏好设置将替换，API Key 导入后在本机加密保存。</p>
+          <input ref="configInput" type="file" accept=".json,application/json" hidden @change="importConfig" />
+        </div>
+      </div>
+      <div class="settings-section">
+        <div class="section-intro">
           <Database :size="20" />
           <h2>备份与迁移</h2>
           <p>把规则、原始方案和审核结果一起带走。</p>
@@ -150,7 +208,7 @@ defineExpose({ mayLeave });
           <div>
             <h2>导出工作空间备份</h2>
             <p class="help-text">
-              备份包含方案 ZIP、规则和审核记录，不包含 API Key
+              备份包含方案 ZIP、参考资料、任务 Prompt 快照、规则和审核记录，不包含 API Key
               或模型连接配置。支持 250 MB、最多 500 个任务和 500 个规则组。
             </p>
           </div>

@@ -1,24 +1,33 @@
 # Netcare RFC方案审核工具
 
+新建审核分为“主方案”和“参考资料”两步。参考资料可选，支持 PDF、DOCX、HTML、TXT、Markdown、PNG、JPG、WebP；最多 12 份，单份 20 MB、合计 50 MB，PDF 最多 300 页。一次选择多份主方案时共用这批参考资料。文本先在本机解析缓存，Agent 按需检索、分页精读或看 PDF 原页 / DOCX 内嵌图；扫描 PDF 需要具备图片理解能力的模型。HTML 参考资料仅提取正文，外部图片不会加载。结果仍定位到主方案，引用参考资料会注明文件名及页/段。
+
+在“模型设置 → 基础审核 Prompt”编辑 Agent 的审核指令，可恢复默认。保存后对新任务生效，任务保留创建时的 Prompt 快照，继续审核不会受后续修改影响。配置导出包含此项，工作空间备份包含参考资料原件及任务 Prompt 快照。
+
 独立运行的方案审核工作台。用户在界面内填写自己的模型 API 地址、模型名和 API Key，维护规则组，上传 HTML 方案 ZIP 后开始审核。无需 HzTech、Redis、OBS 或外部数据库。
 
-提供 **Tauri Windows 桌面程序**，安装包内自带 Node.js 审核引擎和 Vue 界面。使用者无需安装 Node.js、打开终端或浏览器。没有账号或管理员权限系统；模型配置和规则配置是两个独立页面。
+提供 **Tauri Windows x64 / macOS ARM64 便携桌面程序**，ZIP 包内自带 Node.js 审核引擎和 Vue 界面。使用者无需安装 Node.js、打开终端或浏览器。没有账号或管理员权限系统；模型配置和规则配置是两个独立页面。
 
 界面基于 **shadcn-vue / Reka UI / Tailwind CSS 4**，使用中性配色和紧凑侧栏。左下角可切换浅色、深色或跟随系统；选择写入本机数据库，桌面程序更换端口或重启后仍保留。侧栏可收起，审核浮窗可拖拽、向上折叠；修改建议优先展示，审核依据和规则按需展开。方案 HTML 保持原始样式，不反转图片颜色。
 
-## 安装桌面版
+## 使用绿色版
 
-双击 `Netcare RFC方案审核工具_1.2.0_x64-setup.exe` 安装，之后从开始菜单打开 **Netcare RFC方案审核工具**。默认按当前用户安装。Windows 10/11 x64；若缺少 WebView2，安装器会从微软下载并安装其运行时。安装包尚未配置发布者签名。
+从 [GitHub Releases](https://github.com/chenlike/netcare-rfc-reviewer/releases) 下载对应 ZIP，**完整解压到用户可写的固定文件夹**：
+
+- Windows x64：双击 `Netcare RFC方案审核工具.exe`。需要 Windows 10/11 与 Microsoft Edge WebView2 Runtime（多数系统已有）；缺少时从微软官网下载运行时。
+- macOS ARM64：双击 `Netcare RFC方案审核工具.app`，支持 Apple Silicon / macOS 13+。请移动整个解压文件夹到固定位置后打开；不要在 ZIP 中直接运行。当前为 ad-hoc 签名，尚未 Apple 公证，首次打开可能需要通过系统设置 → 隐私与安全性允许打开。
+
+不需要安装 Node.js，也没有安装向导。
 
 桌面窗口自动管理内部引擎，使用系统分配的空闲本机端口，不与已有的 4328 服务冲突。内部服务要求本次桌面实例的会话，不能在其他浏览器中直接访问。重复启动会聚焦已有窗口。
 
 关闭窗口时引擎停止，已保存结果保留；再次启动可继续未完成项。即使桌面进程异常退出，引擎也会因父进程连接断开而退出。
 
-桌面配置和数据均放在**程序安装目录**，以 exe 所在位置解析，不受快捷方式工作目录影响：
+桌面配置和数据均放在**程序安装目录**，Windows 以 exe 所在位置解析，macOS 以 .app 所在文件夹解析，不受快捷方式工作目录影响：
 
 ```text
 安装目录/
-  rfc-review-studio.exe
+  Netcare RFC方案审核工具.exe  # macOS 为 .app，runtime 在 .app 内
   runtime/      内置运行环境
   data/         模型配置、Key、规则、任务、方案包和使用指引进度
   logs/         engine.log 等运行日志
@@ -29,22 +38,41 @@
 
 升级时，如果安装目录尚无工作空间，会自动从旧版 `%LOCALAPPDATA%/com.hezhitech.rfc-review-studio/data` 复制配置、数据库和方案包，校验成功后才启用。旧版必须已关闭；旧目录保留作备份，不再用于日常读写。已有安装目录数据时不会覆盖或合并。旧浏览器版 `.data` 不会自动搬迁，可通过界面备份迁移，或关闭两端后完整复制到新的 `data` 目录。
 
-首次运行没有内置 Key、规则或任务。第一次进入自动展示使用指引，按“连接模型 → 设置审核规则 → 上传第一份方案”完成配置。指引根据已保存的配置更新进度；完成后不再自动弹出，随时可从侧栏“使用指引”重新打开。选择“稍后配置”只收起当前指引，未完成配置时下次启动仍会提示。
+首次运行没有内置 Key 或任务；自动载入 24 项 RFC 预置规则。第一次进入自动展示使用指引，按“连接模型 → 设置审核规则 → 上传第一份方案”完成配置。指引根据已保存的配置更新进度；完成后不再自动弹出，随时可从侧栏“使用指引”重新打开。指引展示过一次后不再自动弹出；可随时从侧栏手动打开。
 
 审核偏好不再显示“同时审核方案数”；内部调度继续使用既有配置（默认 8），升级保留原有设置。
 
-## 从源码构建桌面安装包（开发者）
+## 从源码构建绿色版（开发者）
 
-构建机需要 Node.js 22.19+、Rust MSVC 工具链、Visual Studio C++ 构建工具和 Windows SDK；这些工具不需要安装到使用者电脑。
+两种架构须使用对应的原生构建机。Windows x64 需要 Rust MSVC、Visual Studio C++ 构建工具和 Windows SDK；macOS ARM64 需要 Rust 与 Xcode Command Line Tools。两者均使用 Node.js 22.19.0。
 
 ```sh
 npm ci
-npm run desktop:build
+npm run check
+# Windows
+npm run desktop:build -- --no-bundle
+# macOS（在 Mac 执行）
+npm run desktop:build -- --bundles app
+# 验证最终运行时，生成 ZIP 与 SHA-256 校验文件
+npm run desktop:portable
 ```
 
-输出目录：`src-tauri/target/release/bundle/nsis/`。打包前自动构建前后端，将当前 Windows x64 Node 及生产依赖复制到生成目录；不会打包 `.env`、`.data` 或任何用户 Key。构建机 Node 目录应带有官方分发包的 `LICENSE` 文件。
+产物位于 `release/Netcare-RFC-Reviewer-<版本>-windows-x64.zip` 或 `release/Netcare-RFC-Reviewer-<版本>-macos-arm64.zip`。生产依赖在各自架构上安装，包含 Node、SQLite、sharp、PDF 渲染组件；不包含用户数据和 API Key。
 
-`npm run desktop:prepare` 生成内置运行环境；之后 `npm run desktop:dev` 可调试桌面壳。修改服务或界面后需要重新 prepare。桌面模式不读取 `.env`，地址和 Key 仍在程序内配置。
+`npm run desktop:prepare` 生成内置运行环境；之后 `npm run desktop:dev` 可调试桌面壳。桌面模式不读取 `.env`，地址和 Key 在程序内配置。Windows 原安装器仍可用 `npm run desktop:build` 构建，但 CI 仅发布绿色版。
+
+### GitHub Actions 发布
+
+`.github/workflows/release.yml` 使用两台 GitHub 托管构建机：`windows-2022`（x64）和 `macos-15`（ARM64），不需要自行注册 runner。
+
+- 普通推送和 PR 不触发构建。手动 Run workflow 可验证构建，ZIP 存在 Actions artifacts（保留 14 天）。
+- 推送 `v<版本>` 标签：两套构建均通过后，发布至 GitHub Releases，包含 ZIP 与 SHA-256。标签须匹配 package.json、Cargo.toml、tauri.conf.json 的版本。
+- 升级：退出程序，保留 `data/`、`logs/` 和 `webview/`，替换 exe + runtime（Windows）或 .app（macOS）。
+
+```sh
+git tag v1.2.0
+git push origin v1.2.0
+```
 
 ## 可选：浏览器服务模式（开发者）
 
@@ -68,6 +96,8 @@ npm start
 
 ### 日常操作
 
+- 启动时自动加入包含 24 项检查标准的“RFC 方案审核规则”，每个工作空间仅初始化一次，保留已有规则及后续修改、删除。也可通过“使用 RFC 预置规则”或导入 `presets/rfc-standard.json` 重新载入。预置数据有一处原文差异：网络观察规则标题要求 2 个运行高峰期，正文要求 1 个且大于 48 小时，使用前请统一标准。
+- “数据与帮助 → 配置导入导出”支持迁移规则组、模型连接、审核参数与主题，可选明文携带 API Key；导入后 Key 在本机加密保存。规则新增为独立组，模型及偏好设置替换，不影响审核记录。
 - 一次选择最多 20 个 ZIP，逐个上传，显示每个文件的进度和错误。失败文件可重试，同一上传请求不会重复创建任务。
 - 列表支持搜索、状态筛选、每页 20 条、重命名；可批量继续未完成审核。成功上传的任务会立即进入队列，关闭上传窗口不会撤销它们。
 - 详情页可导出 HTML、Markdown 或 JSON 报告。HTML 可离线阅读、打印；未完成项会单独标明，不会当作审核通过。
@@ -154,7 +184,7 @@ npm run check
 src/core/                 通用 pi-agent 执行器、预算、中止、简短遥测
 src/agents/rfc-review/    RFC 文档解析、阅读工具、证据验证、审核提示词
 src/server/              本地 HTTP、SQLite、任务调度与持久化
-src-tauri/               原生窗口、引擎生命周期、单实例、Windows 安装器
+src-tauri/               原生窗口、引擎生命周期、单实例、跨平台便携打包
 web/src/                 Vue 工作台、规则/模型设置、方案预览
 tests/                   自动测试和显式 UI 测试入口
 ```

@@ -11,6 +11,7 @@ import {
 } from "./store.js";
 import { parsePackage } from "../agents/rfc-review/document.js";
 import { logPreview } from "../core/log-preview.js";
+import { referenceInfo, restoreReferences } from '../agents/rfc-review/references.js';
 
 export const BACKUP_LIMIT = 250 * 1024 * 1024;
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -26,6 +27,7 @@ export async function workspaceInfo(store: Store) {
   for (const task of tasks)
     try {
       bytes += (await stat(store.packagePath(task.Id))).size;
+      if (task.References?.length) bytes += (await stat(store.referencesPath(task.Id))).size;
     } catch {
       missing++;
     }
@@ -98,6 +100,7 @@ export async function exportWorkspace(store: Store) {
   let size = Buffer.byteLength(manifest);
   for (const task of snapshot.tasks) {
     size += (await stat(store.packagePath(task.Id))).size;
+    if (task.References?.length) size += (await stat(store.referencesPath(task.Id))).size;
     if (size > BACKUP_LIMIT)
       throw new Error("工作空间超过 250 MB，请关闭程序后备份整个数据目录");
   }
@@ -108,6 +111,8 @@ export async function exportWorkspace(store: Store) {
       `packages/${task.Id}.zip`,
       await readFile(store.packagePath(task.Id)),
     );
+  for (const task of snapshot.tasks)
+    if (task.References?.length) archive.file(`packages/${task.Id}.references.json`, await readFile(store.referencesPath(task.Id)));
   return archive.generateAsync({ type: "nodebuffer", compression: "STORE" });
 }
 /** Read bounded bytes with strict names; never extract arbitrary paths or trust ZIP size headers alone. */
@@ -141,7 +146,7 @@ export async function readBackup(raw: Buffer): Promise<Map<string, Buffer>> {
         zip.on("entry", (entry: yauzl.Entry) => {
           const name = entry.fileName;
           if (
-            ++count > 502 ||
+            ++count > 1002 ||
             names.has(name) ||
             entry.isEncrypted() ||
             ((entry.externalFileAttributes >>> 16) & 0xf000) === 0xa000 ||
@@ -149,6 +154,7 @@ export async function readBackup(raw: Buffer): Promise<Map<string, Buffer>> {
               name === "workspace.json" ||
               name === "packages/" ||
               /^packages\/[a-f0-9-]{36}\.zip$/i.test(name)
+              || /^packages\/[a-f0-9-]{36}\.references\.json$/i.test(name)
             )
           )
             return fail(new Error("备份含未知、重复或不安全的文件"));
@@ -158,7 +164,7 @@ export async function readBackup(raw: Buffer): Promise<Map<string, Buffer>> {
             return;
           }
           const max =
-            name === "workspace.json" ? 10 * 1024 * 1024 : 50 * 1024 * 1024;
+            name === "workspace.json" ? 10 * 1024 * 1024 : name.endsWith('.references.json') ? 100 * 1024 * 1024 : 50 * 1024 * 1024;
           if (
             entry.uncompressedSize > max ||
             total + entry.uncompressedSize > BACKUP_LIMIT
@@ -211,6 +217,7 @@ export async function importWorkspace(store: Store, raw: Buffer) {
     throw new Error("备份格式或版本不支持");
   const groups = input.groups.map((g: any) => validateGroup(g));
   const tasks: TaskRecord[] = [];
+  const referenceFiles = new Map<string, Buffer>();
   const ids = new Set<string>();
   for (const source of input.tasks) {
     if (!source || !uuid.test(source.Id) || ids.has(source.Id))
@@ -219,6 +226,11 @@ export async function importWorkspace(store: Store, raw: Buffer) {
     const rawPackage = files.get(`packages/${source.Id}.zip`);
     if (!rawPackage) throw new Error("备份缺少方案包");
     const pkg = await parsePackage(rawPackage);
+    const referenceFile = files.get(`packages/${source.Id}.references.json`);
+    if (source.References?.length && !referenceFile) throw new Error('备份缺少参考资料');
+    const references = referenceFile ? await restoreReferences(referenceFile) : [];
+    if (referenceFile) referenceFiles.set(source.Id, Buffer.from(JSON.stringify(references)));
+    if (source.BasePrompt !== undefined && (typeof source.BasePrompt !== 'string' || source.BasePrompt.length > 20000)) throw new Error('备份审核 Prompt 无效');
     if ((pkg.assets?.length || 0) > 2000) throw new Error("方案资源过多");
     if (
       !Array.isArray(source.Checklist) ||
@@ -274,6 +286,8 @@ export async function importWorkspace(store: Store, raw: Buffer) {
       Id: source.Id,
       Title: string(source.Title, 500),
       GroupName: string(source.GroupName, 100),
+      References: references.map(referenceInfo),
+      BasePrompt: source.BasePrompt,
       Status: complete ? "completed" : "cancelled",
       EntryPath:
         pkg.documents.find((d) => d.path === source.EntryPath)?.path ||
@@ -303,7 +317,7 @@ export async function importWorkspace(store: Store, raw: Buffer) {
       Warnings: [...pkg.warnings, "此任务从本地备份恢复。"],
     });
   }
-  if (files.size !== tasks.length + 1)
+  if (files.size !== tasks.length + referenceFiles.size + 1)
     throw new Error("备份包含未关联的方案包");
   // Recheck after asynchronous validation. Caller excludes all concurrent mutations.
   if (store.tasks().length || store.groups().length)
@@ -317,6 +331,11 @@ export async function importWorkspace(store: Store, raw: Buffer) {
         mode: 0o600,
       });
       written.push(file);
+      if (referenceFiles.has(task.Id)) {
+        const referencePath = store.referencesPath(task.Id);
+        await writeFile(referencePath, referenceFiles.get(task.Id)!, { flag: 'wx', mode: 0o600 });
+        written.push(referencePath);
+      }
     }
     store.db.exec("BEGIN IMMEDIATE");
     try {

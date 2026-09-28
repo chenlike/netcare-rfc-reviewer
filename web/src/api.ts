@@ -1,4 +1,6 @@
+import { saveBlob } from './lib/download';
 let token = "";
+let desktop = false;
 export async function bootstrap() {
   const result = await api<{
     token: string;
@@ -6,9 +8,10 @@ export async function bootstrap() {
     directory: string;
     desktop: boolean;
     preferences: { theme: "light" | "dark" | "system" };
-    onboarding: { completed: boolean; modelReady: boolean; rulesReady: boolean };
+    onboarding: { completed: boolean; seen: boolean; modelReady: boolean; rulesReady: boolean };
   }>("/bootstrap");
   token = result.token;
+  desktop = result.desktop;
   return result;
 }
 export async function api<T = any>(
@@ -39,18 +42,14 @@ export async function downloadFile(path: string, name: string) {
     const value = await response.json().catch(() => ({}));
     throw new Error(value.error || `下载失败：HTTP ${response.status}`);
   }
-  const url = URL.createObjectURL(await response.blob());
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = name;
-  anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return saveBlob(await response.blob(), name, desktop);
 }
 export function uploadTask(
   file: File,
   group: string,
   uploadId: string,
   progress: (value: number) => void,
+  references: File[] = [],
 ) {
   return new Promise<import("./types/rfcAudit").Task>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -60,7 +59,7 @@ export function uploadTask(
     );
     xhr.setRequestHeader("X-Studio-Token", token);
     xhr.setRequestHeader("X-Upload-Id", uploadId);
-    xhr.setRequestHeader("Content-Type", "application/zip");
+    if (!references.length) xhr.setRequestHeader("Content-Type", "application/zip");
     xhr.timeout = 300000;
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) progress(Math.round((e.loaded / e.total) * 100));
@@ -80,7 +79,11 @@ export function uploadTask(
         reject(new Error("服务返回无效响应，请重试此文件"));
       }
     };
-    xhr.send(file);
+    if (references.length) {
+      const form = new FormData(); form.append('file', file);
+      for (const reference of references) form.append('references', reference);
+      xhr.send(form);
+    } else xhr.send(file);
   });
 }
 export function save<T = any>(path: string, value: unknown, method = "PUT") {
@@ -97,14 +100,7 @@ export async function downloadPackage(id: string, signal: AbortSignal) {
   return response.blob();
 }
 export function downloadJson(value: unknown, name: string) {
-  const url = URL.createObjectURL(
-    new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }),
-  );
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return saveBlob(new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }), name, desktop);
 }
 export const statusText = (status: string) =>
   ({

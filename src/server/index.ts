@@ -4,6 +4,7 @@ import { Store } from "./store.js";
 import { createApp } from "./app.js";
 import { createInterface } from "node:readline";
 import { migrateLegacyData } from "./data-migration.js";
+import { initializePresets } from "./presets.js";
 
 const desktop = process.env.STUDIO_DESKTOP === "1";
 const desktopSecret = desktop ? process.env.STUDIO_DESKTOP_SECRET : undefined;
@@ -29,8 +30,9 @@ try {
   if (error.code !== "ENOENT") throw error;
 }
 writeFileSync(lock, String(process.pid), { flag: "wx", mode: 0o600 });
-const store = new Store(directory),
-  { server, engine } = createApp(store, undefined, { desktopSecret });
+const store = new Store(directory);
+initializePresets(store);
+const { server, engine } = createApp(store, undefined, { desktopSecret });
 const port = desktop ? 0 : Number(process.env.PORT || 4328);
 if (!Number.isSafeInteger(port) || port < (desktop ? 0 : 1) || port > 65535)
   throw new Error("PORT 无效");

@@ -32,6 +32,7 @@ export interface RuleGroup {
   updatedAt: string;
 }
 export interface Task {
+  References?: { Id: string; Name: string; Size: number; Kind: string; Sections: number; Images: number }[];
   Id: string;
   Title: string;
   GroupName: string;
@@ -52,8 +53,10 @@ export interface Detail {
   Documents: RfcAuditDocument[];
   Warnings: string[];
   Activity: { Preview: string; UpdatedAt: string } | null;
+  ActivityHistory?: { Preview: string; UpdatedAt: string; Event: string }[];
 }
 export interface ModelSettings {
+  basePrompt?: string;
   baseUrl: string;
   model: string;
   apiKey?: string;

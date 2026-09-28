@@ -128,9 +128,13 @@ async function init() {
     desktop.value = result.desktop;
     initializeTheme(result.preferences?.theme);
     setup.value = result.onboarding;
-    guideOpen.value = !result.onboarding.completed;
+    guideOpen.value = !result.onboarding.seen;
     ready.value = true;
     error.value = "";
+    if (guideOpen.value) {
+      await nextTick();
+      await api("/onboarding/seen", { method: "POST" }).catch((e: Error) => notify.error(e.message));
+    }
   } catch (e: any) {
     error.value = e.message;
   }
@@ -168,11 +172,7 @@ onMounted(init);
           }}</span>
         </button>
       </nav>
-      <div v-if="!compact" class="sidebar-note">
-        <span class="note-icon"><ArrowUpRight :size="15" /></span
-        ><b>从证据到结论</b>
-        <p>规则、方案与审核结果，<br />都留在你的工作空间。</p>
-      </div>
+
       <div class="sidebar-bottom">
         <Button variant="ghost" class="theme-trigger" aria-label="使用指引" :disabled="!ready" @click="openGuide"><CircleHelp :size="17" /><span v-if="!compact">使用指引</span></Button>
         <DropdownMenu
@@ -221,7 +221,7 @@ onMounted(init);
           ref="taskEditor"
           @navigate="navigate" /><RuleSettings
           v-else-if="page === 'rules'"
-          ref="ruleEditor" @changed="refreshSetup" /><ModelSettings v-else-if="page === 'model'" ref="modelEditor" :directory="directory" @changed="refreshSetup" /><WorkspaceSettings v-else ref="workspaceEditor" /></div></template>
+          ref="ruleEditor" @changed="refreshSetup" /><ModelSettings v-else-if="page === 'model'" ref="modelEditor" :directory="directory" @changed="refreshSetup" /><WorkspaceSettings v-else ref="workspaceEditor" @changed="refreshSetup" /></div></template>
       <div v-else class="empty-state">
         <LoaderCircle class="animate-spin" />
         <p>正在打开工作空间…</p>

@@ -55,6 +55,8 @@ interface UploadEntry {
   group?: string;
   taskId?: string;
 }
+const uploadStep = ref(1), references = ref<File[]>([]);
+const referencesLocked = computed(() => uploading.value || queue.value.some(q => !!q.group));
 const statusFilter = ref("all"),
   page = ref(1),
   batchBusy = ref(false),
@@ -146,6 +148,7 @@ async function upload() {
           entry.group,
           entry.id,
           (value) => (entry.progress = value),
+          references.value,
         );
         entry.status = "done";
         entry.taskId = task.Id;
@@ -166,6 +169,8 @@ async function upload() {
       if (queue.value.length === 1) selected.value = queue.value[0]!.taskId!;
       uploadOpen.value = false;
       queue.value = [];
+      references.value = [];
+      uploadStep.value = 1;
     }
   } finally {
     uploading.value = false;
@@ -200,6 +205,20 @@ function chooseFile(event: Event) {
     });
   }
   input.value = "";
+}
+function chooseReferences(event: Event) {
+  const input = event.target as HTMLInputElement;
+  for (const file of Array.from(input.files || [])) {
+    if (references.value.some(f => f.name === file.name && f.size === file.size && f.lastModified === file.lastModified)) continue;
+    if (!/\.(pdf|docx|html?|txt|md|png|jpe?g|webp)$/i.test(file.name) || !file.size || file.size > 20 * 1024 * 1024) {
+      notify.error(`${file.name}：请选择支持的格式，单份最大 20 MB`); continue;
+    }
+    if (references.value.length >= 12 || references.value.reduce((n, f) => n + f.size, 0) + file.size > 50 * 1024 * 1024) {
+      notify.error('参考资料最多 12 份，合计最大 50 MB'); break;
+    }
+    references.value.push(file);
+  }
+  input.value = '';
 }
 async function resumeTasks(list: Task[]) {
   if (batchBusy.value || !list.length) return;
@@ -535,11 +554,12 @@ async function remove(task: Task) {
         ><DialogHeader
           ><DialogTitle>新建方案审核</DialogTitle
           ><DialogDescription
-            >上传方案包，Agent 将按所选规则逐项核验。</DialogDescription
+            >先选择主方案，再添加参考资料；确认后开始审核。</DialogDescription
           ></DialogHeader
         >
-        <template v-if="modelReady && groups.length"
-          ><label class="upload-zone"
+        <template v-if="modelReady && groups.length">
+          <div class="upload-stepper"><span :class="{ active: uploadStep === 1 }">1 · 主方案</span><ChevronRight :size="14" /><span :class="{ active: uploadStep === 2 }">2 · 参考资料</span></div>
+          <template v-if="uploadStep === 1"><label class="upload-zone"
             ><input
               type="file"
               multiple
@@ -611,8 +631,16 @@ async function remove(task: Task) {
             />
           </div>
           <p class="field-hint">
-            按文件名命名，上传成功后进入审核队列。失败的文件可单独重试。
-          </p></template
+            按文件名命名；下一步可添加指导书等参考资料。
+          </p></template>
+          <template v-else>
+            <p class="field-hint">已选择 {{ queue.length }} 份主方案，使用「{{ groups.find(g => g.id === groupId)?.name }}」。本批方案共用以下资料；没有参考资料可直接开始。</p>
+            <label class="upload-zone"><input type="file" multiple accept=".pdf,.docx,.html,.htm,.txt,.md,.png,.jpg,.jpeg,.webp" :disabled="referencesLocked" @change="chooseReferences" /><Upload :size="24" /><b>添加指导书或其他参考资料</b><small>PDF、DOCX、HTML、TXT、Markdown、图片</small><small>最多 12 份 · 单份 20 MB · 合计 50 MB · PDF 最多 300 页</small></label>
+            <div v-if="references.length" class="upload-queue"><div v-for="(file, index) in references" :key="index" class="upload-entry"><div><b>{{ file.name }}</b><small class="muted">{{ (file.size / 1024 / 1024).toFixed(2) }} MB</small></div><Button variant="ghost" size="icon-sm" :disabled="referencesLocked" :aria-label="`移除参考资料 ${file.name}`" @click="references.splice(index, 1)"><X :size="14" /></Button></div></div>
+            <p class="field-hint">资料只辅助核验，结论仍定位到主方案。PDF 扫描页和图片需模型支持图片理解；资料按需读取以减少 Token 消耗。</p>
+            <p v-if="referencesLocked && !uploading" class="field-hint">已尝试上传的任务保持原文件以便安全重试；如需更换参考资料，请返回上一步清空方案选择后重新选取。</p>
+            <div v-if="queue.some(q => q.status !== 'waiting')" class="upload-queue"><div v-for="entry in queue" :key="entry.id" class="upload-entry"><div><b>{{ entry.file.name }}</b><small :class="entry.error ? 'danger' : 'muted'">{{ entry.error || (entry.status === 'done' ? '已创建任务' : `上传与解析 ${entry.progress}%`) }}</small></div></div></div>
+          </template></template
         >
         <div v-else class="empty-state compact-empty">
           <Circle />
@@ -634,20 +662,20 @@ async function remove(task: Task) {
             :disabled="uploading"
             @click="uploadOpen = false"
             >关闭</Button
-          ><Button
+          ><Button v-if="uploadStep === 2 && modelReady && groups.length" variant="outline" :disabled="uploading" @click="uploadStep = 1">上一步</Button><Button
             :disabled="
               uploading ||
               !queue.some((q) => q.status !== 'done') ||
               !groupId ||
               !modelReady
             "
-            @click="upload"
+            @click="uploadStep === 1 ? (uploadStep = 2) : upload()"
             ><LoaderCircle v-if="uploading" class="animate-spin" /><ArrowRight
               v-else
             />{{
               uploading
                 ? "正在上传…"
-                : queue.some((q) => q.status === "error")
+                : uploadStep === 1 ? "下一步：参考资料" : queue.some((q) => q.status === "error")
                   ? "重试失败文件"
                   : "上传并开始审核"
             }}</Button

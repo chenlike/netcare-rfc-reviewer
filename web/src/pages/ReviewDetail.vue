@@ -29,6 +29,14 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 const exporting = ref(false);
+async function exportPackage() {
+  try { await downloadFile(`/tasks/${props.id}/download`, `${detail.value?.Task.Title || '方案'}.zip`); }
+  catch (e: any) { notify.error(e.message); }
+}
+async function exportReference(id: string, name: string) {
+  try { await downloadFile(`/tasks/${props.id}/references?id=${encodeURIComponent(id)}`, name); }
+  catch (e: any) { notify.error(e.message); }
+}
 async function exportReport(format: "md" | "html" | "json") {
   if (exporting.value) return;
   exporting.value = true;
@@ -235,8 +243,8 @@ const resultLabel = (c: RfcAuditCheck) =>
       ><span class="review-title" :title="detail?.Task.Title">{{
         detail?.Task.Title || "正在加载方案…"
       }}</span
-      ><a :href="`/api/tasks/${id}/download`" class="toolbar-link"
-        ><Download :size="15" />下载</a
+      ><button @click="exportPackage" class="toolbar-link"
+        ><Download :size="15" />下载</button
       ><button
         class="text-button"
         @click="preview?.reload()"
@@ -334,6 +342,13 @@ const resultLabel = (c: RfcAuditCheck) =>
               >
             </div>
           </div>
+          <details v-if="detail.Task.References?.length" class="package-warnings">
+            <summary>参考资料 · {{ detail.Task.References.length }} 份</summary>
+            <p v-for="item in detail.Task.References" :key="item.Id">
+              <button class="text-button" @click="exportReference(item.Id, item.Name)">{{ item.Name }} <Download :size="12" class="inline" /></button>
+              <small class="muted"> · {{ item.Kind === 'pdf' ? `${item.Sections} 页` : `${item.Sections} 段` }}{{ item.Images && item.Kind !== 'pdf' ? ` · ${item.Images} 张图片` : '' }}</small>
+            </p>
+          </details>
           <details v-if="detail.Warnings.length" class="package-warnings">
             <summary>方案提示 · {{ detail.Warnings.length }}</summary>
             <p v-for="warning in detail.Warnings" :key="warning">
@@ -343,9 +358,19 @@ const resultLabel = (c: RfcAuditCheck) =>
           <div v-if="detail.Task.LastError" class="run-error">
             {{ detail.Task.LastError }}
           </div>
-          <div v-if="detail.Activity" class="activity-line">
-            <i />{{ detail.Activity.Preview }}
-          </div>
+          <details v-if="detail.Activity || detail.ActivityHistory?.length" class="activity-history">
+            <summary>
+              <span class="activity-history-heading">{{ running ? '正在审核' : '近期审核过程' }}<small>查看过程 · {{ detail.ActivityHistory?.length || 0 }} 条</small></span>
+              <span class="activity-current">{{ detail.Activity?.Preview || detail.ActivityHistory?.at(-1)?.Preview }}</span>
+            </summary>
+            <ol aria-label="近期审核活动">
+              <li v-for="(item, index) in [...(detail.ActivityHistory || [])].reverse()" :key="index">
+                <time :datetime="item.UpdatedAt">{{ new Date(item.UpdatedAt).toLocaleTimeString('zh-CN', { hour12: false }) }}</time>
+                <p>{{ item.Preview }}</p>
+              </li>
+            </ol>
+            <p class="activity-history-note">最近 80 条活动，仅在本次程序运行期间保留。</p>
+          </details>
           <nav class="check-filters">
             <button
               v-for="option in [

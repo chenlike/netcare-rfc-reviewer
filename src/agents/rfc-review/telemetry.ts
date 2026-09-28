@@ -11,6 +11,10 @@ export function reviewActivity(checklist: ChecklistItem[]) {
     describeToolCall(name: string, args: unknown): string | undefined {
       const value = record(args), again = value.cursor ? '（续页）' : '';
       switch (name) {
+        case 'list_references': return '查看参考资料目录';
+        case 'search_references': return `检索参考资料：${text(value.query)}`;
+        case 'read_reference': return `查阅指导资料 ${text(value.referenceId)} · 页/段 ${value.section}${again}`;
+        case 'inspect_reference_image': return `查看参考原页/图片 ${text(value.referenceId)} · ${value.image}`;
         case 'list_documents': return `查看${value.images ? '图片引用' : '方案目录'}${again}${value.section ? ' ' + text(value.section) : ''}`;
         case 'read_document': {
           const refs = Array.isArray(value.refs) ? value.refs.slice(0, 6).map(text).join(', ') : '';

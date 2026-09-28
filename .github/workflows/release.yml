@@ -1,0 +1,83 @@
+name: Portable desktop release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    name: ${{ matrix.platform }} portable
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            os: windows-2022
+            args: --no-bundle
+          - platform: macos-arm64
+            os: macos-15
+            args: --bundles app
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - run: npm ci
+      - name: Check version on release tags
+        shell: bash
+        run: node scripts/check-release.mjs
+      - run: npm run check
+      - name: Build native desktop and bundled runtime
+        run: npm run desktop:build -- ${{ matrix.args }}
+      - name: Verify runtime and create portable ZIP
+        run: npm run desktop:portable
+      - uses: actions/upload-artifact@v4
+        with:
+          name: portable-${{ matrix.platform }}
+          path: |
+            release/*.zip
+            release/*.zip.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  publish:
+    name: Publish both portable packages
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: portable-*
+          path: release
+          merge-multiple: true
+      - name: Create release only after both platforms pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "Netcare RFC方案审核工具 $RELEASE_TAG" --notes "Windows x64 与 macOS Apple Silicon 绿色版。完整解压后运行，内置 Node.js。配置与审核数据保存在解压目录。macOS 为 ad-hoc 签名，首次打开可能需要在系统设置中允许；Windows 需要系统 WebView2 Runtime。"
+          fi
+          gh release upload "$RELEASE_TAG" release/*.zip release/*.sha256 --clobber
+          gh release edit "$RELEASE_TAG" --draft=false
