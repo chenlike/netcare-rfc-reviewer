@@ -1,0 +1,23 @@
+[
+  {
+    "Id": "scope",
+    "Title": "变更范围",
+    "Description": "必须明确本次变更的应用服务器数量。",
+    "Level": "必要",
+    "Chapter": "变更范围"
+  },
+  {
+    "Id": "window",
+    "Title": "维护窗口",
+    "Description": "维护窗口必须至少60分钟，小于60分钟不通过。",
+    "Level": "必要",
+    "Chapter": "实施计划"
+  },
+  {
+    "Id": "topology",
+    "Title": "主备拓扑状态",
+    "Description": "必须实际查看拓扑图，确认主备服务器连接，且两台服务器的状态圆点均为绿色。",
+    "Level": "必要",
+    "Chapter": "拓扑图"
+  }
+]

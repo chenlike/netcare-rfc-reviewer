@@ -1,0 +1,7 @@
+body { margin: 0; padding: 32px; font-family: "Microsoft YaHei", sans-serif; color: #233044; background: #f6f8fa; }
+main { max-width: 920px; margin: auto; padding: 32px; background: white; }
+h1 { font-size: 26px; } h2 { font-size: 20px; margin-top: 28px; }
+p { line-height: 1.8; } .notice { color: #667085; }
+img { max-width: 100%; height: auto; } table { border-collapse: collapse; width: 100%; }
+th, td { padding: 12px; border: 1px solid #ccd4df; text-align: left; }
+[data-hd-owschecked="Y"] { color: #14804a; font-weight: bold; }

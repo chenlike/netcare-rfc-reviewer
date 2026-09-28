@@ -1,0 +1,41 @@
+{
+  "name": "rfc-review-studio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "tsc -p tsconfig.server.json && vue-tsc -p tsconfig.web.json --noEmit && vite build",
+    "start": "node --env-file-if-exists=.env dist/server/index.js",
+    "test": "tsx --test tests/*.test.ts",
+    "sample": "node scripts/sample.mjs",
+    "check": "tsc -p tsconfig.server.json --noEmit && vue-tsc -p tsconfig.web.json --noEmit && npm test"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.87.0",
+    "@earendil-works/pi-ai": "0.87.0",
+    "cheerio": "^1.1.2",
+    "css-what": "6.2.2",
+    "sharp": "^0.34.4",
+    "yauzl": "^3.2.0",
+    "vue": "^3.5.18",
+    "element-plus": "^2.11.3",
+    "@element-plus/icons-vue": "^2.3.2",
+    "dompurify": "^3.4.15",
+    "marked": "^18.0.5",
+    "jszip": "3.10.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "@types/yauzl": "^2.10.3",
+    "domhandler": "^5.0.3",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vite": "^6.3.6",
+    "@vitejs/plugin-vue": "^5.2.4",
+    "vue-tsc": "^3.0.4"
+  }
+}

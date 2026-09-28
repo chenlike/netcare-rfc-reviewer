@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>RFC 审核演示方案</title><link rel="stylesheet" href="styles.css"></head>
+<body>
+<main>
+  <h1>应用服务器配置变更方案</h1>
+  <p class="notice">这是人工构造的联调材料，不是实际生产方案。</p>
+  <h2>变更范围</h2>
+  <p id="scope">本次变更涉及 2 台应用服务器，不涉及数据库变更。</p>
+  <h2>维护窗口</h2>
+  <p id="window">维护窗口为 30 分钟。</p>
+  <h2>拓扑图</h2>
+  <p>下图展示主备应用服务器及连接关系，绿色圆点代表状态正常。</p>
+  <img id="topology" src="topology.svg" alt="应用主备拓扑图" width="640" height="230">
+  <h2>回退计划</h2>
+  <table><tr><th>触发条件</th><th>处置</th></tr><tr><td>任一应用健康检查失败</td><td>恢复变更前配置，由值班人员复核服务。</td></tr></table>
+  <h2>表单状态</h2>
+  <p>数据库变更：<span data-hd-owschecked="N">涉及</span> <span data-hd-owschecked="Y">不涉及</span></p>
+</main>
+</body>
+</html>

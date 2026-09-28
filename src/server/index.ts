@@ -1,0 +1,58 @@
+import path from "node:path";
+import { mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { Store } from "./store.js";
+import { createApp } from "./app.js";
+
+const directory = path.resolve(process.env.DATA_DIRECTORY || ".data");
+mkdirSync(directory, { recursive: true, mode: 0o700 });
+const lock = path.join(directory, "instance.lock");
+try {
+  const pid = Number(readFileSync(lock, "utf8"));
+  if (!Number.isSafeInteger(pid) || pid <= 0)
+    throw new Error("无效进程锁，请检查数据目录");
+  try {
+    process.kill(pid, 0);
+    throw new Error(`数据目录已由进程 ${pid} 使用`);
+  } catch (error: any) {
+    if (error.code !== "ESRCH") throw error;
+    unlinkSync(lock);
+  }
+} catch (error: any) {
+  if (error.code !== "ENOENT") throw error;
+}
+writeFileSync(lock, String(process.pid), { flag: "wx", mode: 0o600 });
+const store = new Store(directory),
+  { server, engine } = createApp(store);
+const port = Number(process.env.PORT || 4328);
+if (!Number.isSafeInteger(port) || port < 1 || port > 65535)
+  throw new Error("PORT 无效");
+let closing = false;
+async function stop() {
+  if (closing) return;
+  closing = true;
+  await engine.stop();
+  server.close();
+  server.closeAllConnections();
+  store.close();
+  try {
+    unlinkSync(lock);
+  } catch {}
+}
+server.on("error", (error) => {
+  console.error(error.message);
+  void stop().then(() => {
+    process.exitCode = 1;
+  });
+});
+server.listen(port, "127.0.0.1", () => {
+  console.log(
+    `RFC 审核工作台：http://127.0.0.1:${port}\n数据目录：${directory}`,
+  );
+  engine.recover();
+});
+process.on("SIGINT", () => {
+  void stop();
+});
+process.on("SIGTERM", () => {
+  void stop();
+});

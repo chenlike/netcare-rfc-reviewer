@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="230" viewBox="0 0 640 230">
+<rect width="640" height="230" rx="12" fill="#f1f5f9"/>
+<rect x="40" y="65" width="200" height="105" rx="10" fill="white" stroke="#64748b" stroke-width="2"/>
+<rect x="400" y="65" width="200" height="105" rx="10" fill="white" stroke="#64748b" stroke-width="2"/>
+<path d="M240 116H400" stroke="#3b82f6" stroke-width="4"/>
+<circle cx="74" cy="97" r="12" fill="#16a34a"/><circle cx="434" cy="97" r="12" fill="#16a34a"/>
+<text x="105" y="105" font-family="Arial" font-size="20" fill="#0f172a">PRIMARY</text>
+<text x="465" y="105" font-family="Arial" font-size="20" fill="#0f172a">BACKUP</text>
+<text x="80" y="145" font-family="Arial" font-size="16" fill="#475569">app-01</text>
+<text x="440" y="145" font-family="Arial" font-size="16" fill="#475569">app-02</text>
+<text x="275" y="96" font-family="Arial" font-size="14" fill="#2563eb">sync link</text>
+</svg>
