@@ -66,7 +66,8 @@ npm run desktop:portable
 `.github/workflows/release.yml` 使用两台 GitHub 托管构建机：`windows-2022`（x64）和 `macos-15`（ARM64），不需要自行注册 runner。
 
 - 普通推送和 PR 不触发构建。手动 Run workflow 可验证构建，ZIP 存在 Actions artifacts（保留 14 天）。
-- 推送 `v<版本>` 标签：两套构建均通过后，发布至 GitHub Releases，包含 ZIP 与 SHA-256。标签须匹配 package.json、Cargo.toml、tauri.conf.json 的版本。
+- 推送 `v<版本>` 标签（如 `v0.0.1`）：以标签作为发布版本，在构建目录同步 package.json、锁文件、Tauri、Rust、界面及诊断版本，无需预先手动改版本。两套构建均通过后，发布 ZIP 与 SHA-256 到该标签的 GitHub Release。
+- 修复工作流后补发已有标签：在 main 的 Actions → Portable desktop release → Run workflow 中填写 `release_tag`（例如 `v0.0.1`）。使用该标签的源码和 main 上的发布工具，不移动标签；已有 Release 会补齐产物。只点击旧运行的 Re-run 会继续使用旧工作流。
 - 升级：退出程序，保留 `data/`、`logs/` 和 `webview/`，替换 exe + runtime（Windows）或 .app（macOS）。
 
 ```sh

@@ -4,13 +4,18 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: '已有发布标签（如 v0.0.1）；留空仅测试构建，不发布'
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: portable-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  group: portable-${{ inputs.release_tag || github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -27,20 +32,32 @@ jobs:
             os: macos-15
             args: --bundles app
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: source
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: .release-tools
+      - name: Check out the exact release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
+          path: source
       - uses: actions/setup-node@v4
         with:
           node-version: '22.19.0'
           cache: npm
+          cache-dependency-path: source/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri -> target
+          workspaces: source/src-tauri -> target
+      - name: Use the release tag as the application version
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
+        run: node ../.release-tools/scripts/check-release.mjs .
       - run: npm ci
-      - name: Check version on release tags
-        shell: bash
-        run: node scripts/check-release.mjs
       - run: npm run check
       - name: Build native desktop and bundled runtime
         run: npm run desktop:build -- ${{ matrix.args }}
@@ -50,15 +67,15 @@ jobs:
         with:
           name: portable-${{ matrix.platform }}
           path: |
-            release/*.zip
-            release/*.zip.sha256
+            source/release/*.zip
+            source/release/*.zip.sha256
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
 
   publish:
     name: Publish both portable packages
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -73,7 +90,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         shell: bash
         run: |
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
