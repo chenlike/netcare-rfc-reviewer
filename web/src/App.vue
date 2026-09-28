@@ -41,9 +41,11 @@ const page = ref("tasks"),
   compact = ref(false);
 const setup = ref({ completed: false, modelReady: false, rulesReady: false });
 const guideOpen = ref(false), guideActive = ref(false), guideBusy = ref(false);
+const guideStep = ref(1);
+const guidePages = ['model', 'rules', 'tasks'];
 async function refreshSetup() {
-  try { setup.value = await api("/onboarding"); }
-  catch (e: any) { notify.error(e.message); }
+  try { setup.value = await api("/onboarding"); return true; }
+  catch (e: any) { notify.error(e.message); return false; }
 }
 async function openGuide() {
   await refreshSetup();
@@ -54,10 +56,31 @@ function pauseGuide() {
   guideActive.value = false;
 }
 async function startGuide() {
-  const destination = !setup.value.modelReady ? "model" : !setup.value.rulesReady ? "rules" : "tasks";
-  if (!(await navigate(destination))) return;
+  if (!(await navigate('model'))) return;
+  guideStep.value = 1;
   guideOpen.value = false;
   guideActive.value = true;
+}
+async function selectGuideStep(step: number) {
+  if (guideBusy.value || step < 1 || step > guideStep.value) return;
+  if (await navigate(guidePages[step - 1]!)) guideStep.value = step;
+}
+async function nextGuideStep() {
+  if (guideBusy.value) return;
+  const destination = guidePages[guideStep.value - 1]!;
+  if (page.value !== destination) { await navigate(destination); return; }
+  if (guideStep.value === 3) { await finishGuide(); return; }
+  guideBusy.value = true;
+  try {
+    if (!(await refreshSetup())) return;
+    if (guideStep.value === 1 && !setup.value.modelReady) {
+      notify.warning('请先填写并保存模型配置和 API Key'); return;
+    }
+    if (guideStep.value === 2 && !setup.value.rulesReady) {
+      notify.warning('请先保存至少一条启用的审核规则'); return;
+    }
+    if (await navigate(guidePages[guideStep.value]!)) guideStep.value++;
+  } finally { guideBusy.value = false; }
 }
 async function finishGuide() {
   if (guideBusy.value || !(await navigate("tasks"))) return;
@@ -215,13 +238,13 @@ onMounted(init);
         <Button @click="init">重新连接</Button>
       </div>
       <template v-else-if="ready">
-        <SetupGuide :open="guideOpen" :active="guideActive" :model-ready="setup.modelReady" :rules-ready="setup.rulesReady" :busy="guideBusy" @start="startGuide" @pause="pauseGuide" @navigate="navigate" @finish="finishGuide" />
+        <SetupGuide :open="guideOpen" :active="guideActive" :step="guideStep" :page="page" :busy="guideBusy" @start="startGuide" @pause="pauseGuide" @select="selectGuideStep" @next="nextGuideStep" />
         <div class="workspace-content"><TaskList
           v-if="page === 'tasks'"
           ref="taskEditor"
           @navigate="navigate" /><RuleSettings
           v-else-if="page === 'rules'"
-          ref="ruleEditor" @changed="refreshSetup" /><ModelSettings v-else-if="page === 'model'" ref="modelEditor" :directory="directory" @changed="refreshSetup" /><WorkspaceSettings v-else ref="workspaceEditor" @changed="refreshSetup" /></div></template>
+          ref="ruleEditor" :guided="guideActive && guideStep === 2" @changed="refreshSetup" /><ModelSettings v-else-if="page === 'model'" ref="modelEditor" :directory="directory" @changed="refreshSetup" /><WorkspaceSettings v-else ref="workspaceEditor" @changed="refreshSetup" /></div></template>
       <div v-else class="empty-state">
         <LoaderCircle class="animate-spin" />
         <p>正在打开工作空间…</p>

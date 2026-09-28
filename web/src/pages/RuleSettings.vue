@@ -21,6 +21,7 @@ import {
 import { api, save, downloadJson } from "../api";
 import type { Rule, RuleGroup } from "../types/rfcAudit";
 import preset from "../../../presets/rfc-standard.json";
+const props = defineProps<{ guided?: boolean }>();
 const emit = defineEmits<{ changed: [] }>();
 const groups = ref<RuleGroup[]>([]),
   draft = ref<RuleGroup>(),
@@ -31,7 +32,12 @@ async function load() {
   groups.value = await api("/groups");
   emit("changed");
 }
-onMounted(() => load().catch((e) => notify.error(e.message)));
+onMounted(async () => {
+  try {
+    await load();
+    if (props.guided && groups.value[0]) await select(groups.value[0]);
+  } catch (e: any) { notify.error(e.message); }
+});
 function emptyRule(): Rule {
   return {
     Id: crypto.randomUUID(),
