@@ -48,7 +48,7 @@ export const DEFAULT_MODEL: ModelSettings = {
   temperature: 0,
   maxTokens: 8192,
   contextWindow: 128000,
-  concurrency: 8,
+  concurrency: 1,
   requestTimeoutMs: 120000,
 };
 export interface TaskCheck extends ChecklistItem {
@@ -167,6 +167,7 @@ export class Store {
     return {
       ...DEFAULT_MODEL,
       ...settings,
+      concurrency: 1,
       hasApiKey: !!encryptedKey,
       ...(secret
         ? { apiKey: encryptedKey ? this.decrypt(encryptedKey) : "" }
@@ -377,7 +378,7 @@ export function validateModel(value: any): ModelSettings {
     temperature: value.temperature,
     maxTokens: value.maxTokens,
     contextWindow: value.contextWindow,
-    concurrency: value.concurrency,
+    concurrency: 1,
     requestTimeoutMs: value.requestTimeoutMs,
   };
 }

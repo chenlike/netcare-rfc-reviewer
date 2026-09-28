@@ -132,7 +132,7 @@ onBeforeUnmount(() => {
   clearTimeout(timer);
 });
 async function upload() {
-  if (uploading.value || !groupId.value || !queue.value.length) return;
+  if (uploading.value || !groupId.value || queue.value.length !== 1) return;
   uploading.value = true;
   const pending = queue.value.filter((q) => q.status !== "done");
   let successes = 0;
@@ -178,33 +178,19 @@ async function upload() {
 }
 function chooseFile(event: Event) {
   const input = event.target as HTMLInputElement;
-  for (const file of Array.from(input.files || [])) {
-    if (queue.value.length >= 20) {
-      notify.warning("每批最多选择 20 份方案");
-      break;
-    }
-    if (!/\.zip$/i.test(file.name) || file.size > 50 * 1024 * 1024) {
-      notify.error(`${file.name}：请选择 50 MB 以内的 ZIP 文件`);
-      continue;
-    }
-    if (
-      queue.value.some(
-        (q) =>
-          q.file.name === file.name &&
-          q.file.size === file.size &&
-          q.file.lastModified === file.lastModified,
-      )
-    )
-      continue;
-    queue.value.push({
-      id: crypto.randomUUID(),
-      file,
-      status: "waiting",
-      progress: 0,
-      error: "",
-    });
-  }
+  const files = Array.from(input.files || []);
   input.value = "";
+  if (referencesLocked.value || !files.length) return;
+  if (files.length !== 1) {
+    notify.warning("每次只能上传一个 ZIP 主方案");
+    return;
+  }
+  const file = files[0]!;
+  if (!/\.zip$/i.test(file.name) || !file.size || file.size > 50 * 1024 * 1024) {
+    notify.error(`${file.name}：请选择 50 MB 以内的 ZIP 文件`);
+    return;
+  }
+  queue.value = [{ id: crypto.randomUUID(), file, status: "waiting", progress: 0, error: "" }];
 }
 function chooseReferences(event: Event) {
   const input = event.target as HTMLInputElement;
@@ -272,7 +258,7 @@ async function submitRename() {
 }
 function mayLeave() {
   if (uploading.value) {
-    notify.warning("文件正在上传，请等待这批上传完成");
+    notify.warning("文件正在上传，请等待上传完成");
     return false;
   }
   return true;
@@ -371,7 +357,7 @@ async function remove(task: Task) {
           ]"
         />
         <span v-if="active" class="running-label"
-          ><span class="local-dot" />{{ active }} 个正在处理</span
+          ><span class="local-dot" />{{ active }} 个审核中或排队</span
         >
       </div>
       <div class="search-field">
@@ -562,17 +548,16 @@ async function remove(task: Task) {
           <template v-if="uploadStep === 1"><label class="upload-zone"
             ><input
               type="file"
-              multiple
               accept=".zip,application/zip"
-              :disabled="uploading"
+              :disabled="referencesLocked"
               @change="chooseFile"
             /><span class="upload-glyph"><Upload :size="24" /></span
             ><b>{{
               queue.length
-                ? `已选择 ${queue.length} 份方案 · 点击添加`
-                : "选择一个或多个 ZIP 方案包"
+                ? "已选择主方案 · 点击更换"
+                : "选择一个 ZIP 主方案"
             }}</b
-            ><small>每份最大 50 MB · 每批最多 20 份</small></label
+            ><small>每次仅限一份 · 最大 50 MB · 方案依次审核</small></label
           >
           <div v-if="queue.length" class="upload-queue">
             <div v-for="entry in queue" :key="entry.id" class="upload-entry">
@@ -634,7 +619,7 @@ async function remove(task: Task) {
             按文件名命名；下一步可添加指导书等参考资料。
           </p></template>
           <template v-else>
-            <p class="field-hint">已选择 {{ queue.length }} 份主方案，使用「{{ groups.find(g => g.id === groupId)?.name }}」。本批方案共用以下资料；没有参考资料可直接开始。</p>
+            <p class="field-hint">已选择 1 份主方案，使用「{{ groups.find(g => g.id === groupId)?.name }}」。可添加多份参考资料；没有参考资料可直接开始。其他方案审核中时，本方案会排队等待。</p>
             <label class="upload-zone"><input type="file" multiple accept=".pdf,.docx,.html,.htm,.txt,.md,.png,.jpg,.jpeg,.webp" :disabled="referencesLocked" @change="chooseReferences" /><Upload :size="24" /><b>添加指导书或其他参考资料</b><small>PDF、DOCX、HTML、TXT、Markdown、图片</small><small>最多 12 份 · 单份 20 MB · 合计 50 MB · PDF 最多 300 页</small></label>
             <div v-if="references.length" class="upload-queue"><div v-for="(file, index) in references" :key="index" class="upload-entry"><div><b>{{ file.name }}</b><small class="muted">{{ (file.size / 1024 / 1024).toFixed(2) }} MB</small></div><Button variant="ghost" size="icon-sm" :disabled="referencesLocked" :aria-label="`移除参考资料 ${file.name}`" @click="references.splice(index, 1)"><X :size="14" /></Button></div></div>
             <p class="field-hint">资料只辅助核验，结论仍定位到主方案。PDF 扫描页和图片需模型支持图片理解；资料按需读取以减少 Token 消耗。</p>

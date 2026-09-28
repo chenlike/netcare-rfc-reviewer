@@ -53,7 +53,8 @@ export class Engine {
     const settings = this.store.model(true);
     if (!settings.apiKey) return;
     for (const task of this.store.tasks().reverse()) {
-      if (this.active.size >= settings.concurrency) break;
+      // 桌面工作台逐份审核；旧配置或导入配置不能放大并发。
+      if (this.active.size >= 1) break;
       if (task.Status !== "queued" || this.active.has(task.Id)) continue;
       task.Status = "running";
       task.Attempt++;

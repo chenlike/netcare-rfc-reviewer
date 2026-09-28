@@ -249,8 +249,10 @@ export function createApp(
             if (req.headers['content-type']?.startsWith('multipart/form-data')) {
               const bytes = await body(req, 102 * 1024 * 1024);
               const form = await new Response(bytes, { headers: { 'Content-Type': req.headers['content-type'] } }).formData();
+              if (form.getAll('file').length !== 1) throw new Error('每次只能上传一个 ZIP 主方案');
               const main = form.get('file'), files = form.getAll('references');
               if (!(main instanceof File) || main.size > 50 * 1024 * 1024) throw new Error('主方案最大 50 MB');
+              if (!/\.zip$/i.test(main.name)) throw new Error('请选择 ZIP 主方案');
               if (files.length > REFERENCE_MAX_COUNT || files.some(f => !(f instanceof File)) || files.reduce((n, f) => n + (f as File).size, 0) > REFERENCE_MAX_TOTAL)
                 throw new Error('参考资料最多 12 份，合计最大 50 MB');
               raw = Buffer.from(await main.arrayBuffer());

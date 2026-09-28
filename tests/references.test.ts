@@ -101,6 +101,12 @@ test('multipart task creation freezes reference materials and prompt, backup res
     const base = `http://127.0.0.1:${(server.address() as any).port}`;
     const boot = await (await fetch(base + '/api/bootstrap')).json() as any;
     const id = randomUUID(), headers = { 'X-Studio-Token': boot.token, 'X-Upload-Id': id };
+    const invalid = new FormData();
+    for (const name of ['one.zip', 'two.zip']) invalid.append('file', new Blob([new Uint8Array(zipHtml('<p>Plan</p>'))]), name);
+    const rejected = await fetch(base + `/api/tasks?group=${group.id}&fileName=plan.zip`, { method: 'POST', headers: { ...headers, 'X-Upload-Id': randomUUID() }, body: invalid });
+    assert.equal(rejected.status, 400);
+    assert.match(await rejected.text(), /每次只能上传一个 ZIP 主方案/);
+    assert.equal(store.tasks().length, 0);
     const form = new FormData();
     form.append('file', new Blob([new Uint8Array(zipHtml('<p id="scope">Available</p>'))]), 'plan.zip');
     form.append('references', new Blob(['参考标准 8.6.1']), 'guide.txt');

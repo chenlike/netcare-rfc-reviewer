@@ -184,13 +184,15 @@ for (const action of ["cancel", "remove"] as const)
     await engine.stop();
   });
 
-test("configured concurrency is bounded and queued work starts once capacity becomes available", async (t) => {
+test("legacy concurrency settings still run one review at a time and drain the queue", async (t) => {
   const store = await fixture(t);
   store.saveModel({
     ...DEFAULT_MODEL,
     apiKey: "local-test-secret",
-    concurrency: 2,
+    concurrency: 8,
   });
+  assert.equal(store.model().concurrency, 1);
+  assert.equal(validateModel({ ...DEFAULT_MODEL, concurrency: 8 }).concurrency, 1);
   for (let i = 0; i < 4; i++) await makeTask(store);
   let active = 0,
     peak = 0,
@@ -209,7 +211,7 @@ test("configured concurrency is bounded and queued work starts once capacity bec
   engine.pump();
   engine.pump();
   await engine.idle();
-  assert.equal(peak, 2);
+  assert.equal(peak, 1);
   assert.equal(calls, 4);
   assert.ok(store.tasks().every((t) => t.Status === "completed"));
   await engine.stop();
