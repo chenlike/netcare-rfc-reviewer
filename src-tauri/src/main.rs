@@ -4,6 +4,7 @@ use std::os::windows::process::CommandExt;
 use std::{
     fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, Write},
+    path::PathBuf,
     process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicU16, Ordering},
@@ -48,18 +49,42 @@ fn failure(app: &tauri::AppHandle, message: &str) {
         let _ = window.eval(&format!("document.getElementById('title').textContent={title};document.getElementById('status').textContent={text};document.getElementById('progress').style.display='none'"));
     }
 }
+fn startup_error(message: &str) {
+    #[cfg(windows)]
+    {
+        #[link(name = "user32")]
+        extern "system" {
+            fn MessageBoxW(window: *mut std::ffi::c_void, text: *const u16, caption: *const u16, flags: u32) -> i32;
+        }
+        let text: Vec<u16> = message.encode_utf16().chain(Some(0)).collect();
+        let title: Vec<u16> = "Netcare 启动失败".encode_utf16().chain(Some(0)).collect();
+        unsafe { MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), 0x10); }
+    }
+    #[cfg(not(windows))]
+    eprintln!("{message}");
+}
+fn install_directory() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let executable = std::env::current_exe()?;
+    let directory = executable.parent().ok_or("无法定位程序安装目录")?.to_path_buf();
+    let probe = directory.join(format!(".netcare-write-check-{}", uuid::Uuid::new_v4().simple()));
+    let file = OpenOptions::new().create_new(true).write(true).open(&probe)
+        .map_err(|error| format!("安装目录不可写：{}\n请将软件安装到当前用户有写入权限的目录，例如 D:\\Netcare。\n不会改用 C 盘用户目录。\n{error}", directory.display()))?;
+    drop(file);
+    fs::remove_file(probe)?;
+    Ok(directory)
+}
 fn start_runtime(
     app: tauri::AppHandle,
     state: Arc<Runtime>,
+    install: PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let data = app.path().app_local_data_dir()?;
-    fs::create_dir_all(data.join("logs"))?;
-    let logfile = data.join("logs/engine.log");
+    fs::create_dir_all(install.join("logs"))?;
+    let logfile = install.join("logs/engine.log");
     if fs::metadata(&logfile)
         .map(|m| m.len() > 5_000_000)
         .unwrap_or(false)
     {
-        let _ = fs::rename(&logfile, data.join("logs/engine.previous.log"));
+        let _ = fs::rename(&logfile, install.join("logs/engine.previous.log"));
     }
     let log = Arc::new(Mutex::new(
         OpenOptions::new()
@@ -77,7 +102,8 @@ fn start_runtime(
     command
         .arg(root.join("dist/server/index.js"))
         .current_dir(&root)
-        .env("DATA_DIRECTORY", data.join("data"))
+        .env("DATA_DIRECTORY", install.join("data"))
+        .env("STUDIO_LEGACY_DATA_DIRECTORY", app.path().app_local_data_dir()?.join("data"))
         .env("STUDIO_DESKTOP", "1")
         .env("STUDIO_DESKTOP_SECRET", &secret)
         .env_remove("NODE_OPTIONS")
@@ -117,7 +143,7 @@ fn start_runtime(
         }
     });
     let port = receiver
-        .recv_timeout(Duration::from_secs(45))
+        .recv_timeout(Duration::from_secs(180))
         .map_err(|_| {
             format!(
                 "审核引擎未能启动。请关闭后重新打开。\n日志：{}",
@@ -146,10 +172,13 @@ fn main() {
             }
         }))
         .setup(move |app| {
+            let install = install_directory()?;
+            fs::create_dir_all(install.join("webview"))?;
             let nav_state = setup_state.clone();
             let window =
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                    .title("RFC Studio · 方案审核工作台")
+                    .title("Netcare RFC方案审核工具")
+                    .data_directory(install.join("webview"))
                     .inner_size(1440.0, 960.0)
                     .min_inner_size(960.0, 680.0)
                     .center()
@@ -185,15 +214,18 @@ fn main() {
             let handle = app.handle().clone();
             let runtime = setup_state.clone();
             std::thread::spawn(move || {
-                if let Err(error) = start_runtime(handle.clone(), runtime.clone()) {
+                if let Err(error) = start_runtime(handle.clone(), runtime.clone(), install) {
                     failure(&handle, &error.to_string());
                     runtime.stop();
                 }
             });
             Ok(())
         })
-        .build(tauri::generate_context!())
-        .expect("无法启动 RFC Studio");
+        .build(tauri::generate_context!());
+    let app = match app {
+        Ok(app) => app,
+        Err(error) => { startup_error(&error.to_string()); return; }
+    };
     app.run(move |_, event| {
         if let tauri::RunEvent::Exit = event {
             state.stop();

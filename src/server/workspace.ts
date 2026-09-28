@@ -35,7 +35,7 @@ export async function workspaceInfo(store: Store) {
     availableBytes = disk.bavail * disk.bsize;
   } catch {}
   return {
-    version: "1.1.0",
+    version: "1.2.0",
     directory: store.directory,
     taskCount: tasks.length,
     groupCount: store.groups().length,
@@ -54,7 +54,7 @@ export function diagnostics(store: Store) {
   const tasks = store.tasks(),
     key = store.model(true).apiKey || "";
   return {
-    version: "1.1.0",
+    version: "1.2.0",
     generatedAt: new Date().toISOString(),
     platform: process.platform,
     node: process.version,
@@ -198,7 +198,7 @@ export async function importWorkspace(store: Store, raw: Buffer) {
     );
   const files = await readBackup(raw);
   const manifest = files.get("workspace.json");
-  if (!manifest) throw new Error("不是 RFC Studio 备份文件");
+  if (!manifest) throw new Error("不是 Netcare RFC方案审核工具 备份文件");
   const input = JSON.parse(manifest.toString("utf8"));
   if (
     input.format !== "rfc-studio-backup" ||

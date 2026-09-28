@@ -175,7 +175,10 @@ body,
   display: grid;
   place-items: center;
   color: var(--foreground);
+  font-size: 21px;
+  font-weight: 750;
 }
+.brand-name small { display: block; font-size: 10px; font-weight: 500; letter-spacing: .3px; color: var(--muted-foreground); margin-top: 2px; }
 .workspace-label {
   display: flex;
   align-items: center;
@@ -278,12 +281,34 @@ body,
   justify-content: center;
 }
 .workspace {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   position: relative;
   background: var(--background);
 }
+.workspace-content { flex: 1; min-height: 0; min-width: 0; }
+.setup-emblem { display: grid; place-items: center; width: 42px; height: 42px; background: var(--foreground); color: var(--background); border-radius: 12px; font-size: 23px; font-weight: 750; margin-bottom: 12px; }
+.setup-steps-list { display: grid; gap: 23px; padding: 15px 0; list-style: none; }
+.setup-steps-list li { display: flex; gap: 15px; align-items: flex-start; }
+.setup-number { display: grid; place-items: center; flex: 0 0 30px; height: 30px; border: 1px solid var(--border); border-radius: 50%; color: var(--muted-foreground); font-size: 12px; }
+.setup-number.done { background: var(--muted); color: var(--foreground); }
+.setup-steps-list b { display: flex; gap: 12px; align-items: center; font-size: 13px; font-weight: 600; }
+.setup-steps-list b small { font-size: 10px; font-weight: 400; color: var(--muted-foreground); }
+.setup-steps-list p { color: var(--muted-foreground); font-size: 12px; line-height: 1.7; margin-top: 4px; }
+.setup-banner { flex-shrink: 0; border-bottom: 1px solid var(--border); padding: 14px 28px; background: var(--card); }
+.setup-banner-top, .setup-banner-bottom { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.setup-banner-bottom { margin-top: 8px; }
+.setup-banner-bottom p { color: var(--muted-foreground); font-size: 12px; line-height: 1.6; }
+.setup-progress { display: flex; flex-wrap: wrap; gap: 20px; }
+.setup-progress button { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted-foreground); cursor: pointer; }
+.setup-progress button.current { color: var(--foreground); font-weight: 600; }
+.setup-progress button:disabled { cursor: default; opacity: .5; }
+.setup-step-index { display: grid; place-items: center; width: 19px; height: 19px; border-radius: 50%; border: 1px solid var(--border); font-size: 10px; }
+.setup-progress button.current .setup-step-index { background: var(--foreground); color: var(--background); }
+@media (max-width: 900px) { .setup-banner { padding: 12px 20px; } .setup-progress { gap: 12px; } .setup-banner-bottom { flex-wrap: wrap; } }
 .page {
   height: 100%;
   overflow: auto;

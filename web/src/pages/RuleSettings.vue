@@ -20,6 +20,7 @@ import {
 
 import { api, save, downloadJson } from "../api";
 import type { Rule, RuleGroup } from "../types/rfcAudit";
+const emit = defineEmits<{ changed: [] }>();
 const groups = ref<RuleGroup[]>([]),
   draft = ref<RuleGroup>(),
   busy = ref(false),
@@ -27,6 +28,7 @@ const groups = ref<RuleGroup[]>([]),
   importInput = ref<HTMLInputElement>();
 async function load() {
   groups.value = await api("/groups");
+  emit("changed");
 }
 onMounted(() => load().catch((e) => notify.error(e.message)));
 function emptyRule(): Rule {

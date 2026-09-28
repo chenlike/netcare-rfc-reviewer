@@ -65,7 +65,7 @@ async function restore(event: Event) {
   input.value = "";
   if (!file || busy.value) return;
   if (!/\.zip$/i.test(file.name) || file.size > 251 * 1024 * 1024) {
-    notify.error("请选择 250 MB 以内的 RFC Studio 备份 ZIP");
+    notify.error("请选择 250 MB 以内的 Netcare RFC方案审核工具 备份 ZIP");
     return;
   }
   try {
@@ -188,7 +188,7 @@ defineExpose({ mayLeave });
           <details class="advanced-settings">
             <summary>超过自动备份大小时怎么办？</summary>
             <p class="help-text">
-              关闭 RFC Studio 后，复制下方完整数据目录（包括数据库、master.key
+              关闭 Netcare RFC方案审核工具 后，复制下方完整数据目录（包括数据库、master.key
               与
               packages）。迁移到新设备时，先运行一次程序，再关闭程序，将数据完整还原到新设备的数据目录。不要覆盖已有工作空间。
             </p>
@@ -245,7 +245,7 @@ defineExpose({ mayLeave });
         <div>
           <b>本地数据目录</b><code>{{ info.directory }}</code>
         </div>
-        <span>RFC Studio {{ info.version }}</span>
+        <span>Netcare RFC方案审核工具 {{ info.version }}</span>
       </div>
     </template>
     <div v-else-if="!error" class="empty-state">

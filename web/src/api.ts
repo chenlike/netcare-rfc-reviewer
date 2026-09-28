@@ -6,6 +6,7 @@ export async function bootstrap() {
     directory: string;
     desktop: boolean;
     preferences: { theme: "light" | "dark" | "system" };
+    onboarding: { completed: boolean; modelReady: boolean; rulesReady: boolean };
   }>("/bootstrap");
   token = result.token;
   return result;

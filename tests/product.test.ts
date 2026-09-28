@@ -71,6 +71,40 @@ async function seed(s: Store) {
   s.saveTask(task);
   return task;
 }
+
+test("first-run guidance requires saved model and enabled rules, persists across restart and survives theme changes", async (t) => {
+  const s = await store(t);
+  const app = createApp(s);
+  app.server.listen(0, "127.0.0.1");
+  await once(app.server, "listening");
+  t.after(async () => {
+    await app.engine.stop();
+    app.server.closeAllConnections();
+    app.server.close();
+  });
+  const base = `http://127.0.0.1:${(app.server.address() as any).port}`;
+  const initial: any = await (await fetch(base + "/api/bootstrap")).json();
+  assert.deepEqual(initial.onboarding, { completed: false, modelReady: false, rulesReady: false });
+  assert.equal((await fetch(base + "/api/onboarding/complete", { method: "POST" })).status, 403);
+  const complete = () => fetch(base + "/api/onboarding/complete", { method: "POST", headers: { "X-Studio-Token": initial.token } });
+  assert.equal((await complete()).status, 400);
+  s.saveModel({ ...DEFAULT_MODEL, apiKey: "onboarding-fixture-key" });
+  const group = s.saveGroup(validateGroup({ name: "Guide rules", rules: [{ Id: "one", Title: "Scope", Description: "Check scope", enabled: false }] }));
+  assert.equal((await complete()).status, 400);
+  group.rules[0]!.enabled = true;
+  s.saveGroup(group);
+  const response = await complete();
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { completed: true, modelReady: true, rulesReady: true });
+  s.savePreferences({ theme: "dark" });
+  const reopened = new Store(s.directory);
+  try {
+    assert.equal(reopened.onboarding().completed, true);
+    assert.equal(reopened.preferences().theme, "dark");
+  } finally { reopened.close(); }
+  s.saveModel(DEFAULT_MODEL, true);
+  assert.deepEqual(s.onboarding(), { completed: true, modelReady: false, rulesReady: true });
+});
 test("portable backup restores rules, packages and stopped tasks without keys or automatic execution", async (t) => {
   const source = await store(t),
     target = await store(t);

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { nextTick, onMounted, ref } from "vue";
 import {
   FileCheck2,
   ListChecks,
@@ -12,7 +12,7 @@ import {
   ChevronDown,
   ArrowUpRight,
   LoaderCircle,
-  Command,
+  CircleHelp,
   Database,
 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
@@ -27,7 +27,8 @@ import {
 import FeedbackHost from "@/components/FeedbackHost.vue";
 import { theme, initializeTheme, setTheme, type Theme } from "@/lib/theme";
 import { notify } from "@/lib/feedback";
-import { bootstrap } from "./api";
+import { api, bootstrap } from "./api";
+import SetupGuide from "./components/SetupGuide.vue";
 import TaskList from "./pages/TaskList.vue";
 import RuleSettings from "./pages/RuleSettings.vue";
 import ModelSettings from "./pages/ModelSettings.vue";
@@ -38,6 +39,37 @@ const page = ref("tasks"),
   directory = ref(""),
   desktop = ref(false),
   compact = ref(false);
+const setup = ref({ completed: false, modelReady: false, rulesReady: false });
+const guideOpen = ref(false), guideActive = ref(false), guideBusy = ref(false);
+async function refreshSetup() {
+  try { setup.value = await api("/onboarding"); }
+  catch (e: any) { notify.error(e.message); }
+}
+async function openGuide() {
+  await refreshSetup();
+  guideOpen.value = true;
+}
+function pauseGuide() {
+  guideOpen.value = false;
+  guideActive.value = false;
+}
+async function startGuide() {
+  const destination = !setup.value.modelReady ? "model" : !setup.value.rulesReady ? "rules" : "tasks";
+  if (!(await navigate(destination))) return;
+  guideOpen.value = false;
+  guideActive.value = true;
+}
+async function finishGuide() {
+  if (guideBusy.value || !(await navigate("tasks"))) return;
+  guideBusy.value = true;
+  try {
+    setup.value = await api("/onboarding/complete", { method: "POST" });
+    pauseGuide();
+    await nextTick();
+    taskEditor.value?.openUpload();
+  } catch (e: any) { notify.error(e.message); await refreshSetup(); }
+  finally { guideBusy.value = false; }
+}
 const ruleEditor = ref<InstanceType<typeof RuleSettings>>();
 const modelEditor = ref<InstanceType<typeof ModelSettings>>(),
   taskEditor = ref<InstanceType<typeof TaskList>>(),
@@ -54,32 +86,33 @@ const themes = [
   { id: "system", label: "跟随系统", icon: Monitor },
 ] as const;
 async function navigate(next: string) {
-  if (next === page.value) return;
+  if (next === page.value) return true;
   if (
     page.value === "rules" &&
     ruleEditor.value &&
     !(await ruleEditor.value.mayLeave())
   )
-    return;
+    return false;
   if (
     page.value === "model" &&
     modelEditor.value &&
     !(await modelEditor.value.mayLeave())
   )
-    return;
+    return false;
   if (
     page.value === "tasks" &&
     taskEditor.value &&
     !taskEditor.value.mayLeave()
   )
-    return;
+    return false;
   if (
     page.value === "workspace" &&
     workspaceEditor.value &&
     !workspaceEditor.value.mayLeave()
   )
-    return;
+    return false;
   page.value = next;
+  return true;
 }
 async function changeTheme(value: Theme) {
   try {
@@ -94,6 +127,8 @@ async function init() {
     directory.value = result.directory;
     desktop.value = result.desktop;
     initializeTheme(result.preferences?.theme);
+    setup.value = result.onboarding;
+    guideOpen.value = !result.onboarding.completed;
     ready.value = true;
     error.value = "";
   } catch (e: any) {
@@ -106,8 +141,8 @@ onMounted(init);
   <div class="app-shell" :class="{ 'sidebar-compact': compact }">
     <aside class="sidebar">
       <div class="brand-row">
-        <div class="brand-mark"><Command :size="19" /></div>
-        <strong v-if="!compact">RFC Studio</strong
+        <div class="brand-mark" aria-hidden="true">N</div>
+        <strong v-if="!compact" class="brand-name" aria-label="Netcare RFC方案审核工具">Netcare<small>RFC方案审核工具</small></strong
         ><Button
           variant="ghost"
           size="icon-sm"
@@ -139,6 +174,7 @@ onMounted(init);
         <p>规则、方案与审核结果，<br />都留在你的工作空间。</p>
       </div>
       <div class="sidebar-bottom">
+        <Button variant="ghost" class="theme-trigger" aria-label="使用指引" :disabled="!ready" @click="openGuide"><CircleHelp :size="17" /><span v-if="!compact">使用指引</span></Button>
         <DropdownMenu
           ><DropdownMenuTrigger as-child
             ><Button
@@ -168,7 +204,7 @@ onMounted(init);
         >
         <div v-if="!compact" class="sidebar-foot" :title="directory">
           <span>{{ desktop ? "桌面版" : "本地运行" }}</span
-          ><span>v1.1.0</span>
+          ><span>v1.2.0</span>
         </div>
       </div>
     </aside>
@@ -178,13 +214,14 @@ onMounted(init);
         <p class="danger">{{ error }}</p>
         <Button @click="init">重新连接</Button>
       </div>
-      <template v-else-if="ready"
-        ><TaskList
+      <template v-else-if="ready">
+        <SetupGuide :open="guideOpen" :active="guideActive" :model-ready="setup.modelReady" :rules-ready="setup.rulesReady" :busy="guideBusy" @start="startGuide" @pause="pauseGuide" @navigate="navigate" @finish="finishGuide" />
+        <div class="workspace-content"><TaskList
           v-if="page === 'tasks'"
           ref="taskEditor"
           @navigate="navigate" /><RuleSettings
           v-else-if="page === 'rules'"
-          ref="ruleEditor" /><ModelSettings v-else-if="page === 'model'" ref="modelEditor" :directory="directory" /><WorkspaceSettings v-else ref="workspaceEditor" /></template>
+          ref="ruleEditor" @changed="refreshSetup" /><ModelSettings v-else-if="page === 'model'" ref="modelEditor" :directory="directory" @changed="refreshSetup" /><WorkspaceSettings v-else ref="workspaceEditor" /></div></template>
       <div v-else class="empty-state">
         <LoaderCircle class="animate-spin" />
         <p>正在打开工作空间…</p>

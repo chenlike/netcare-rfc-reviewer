@@ -7,6 +7,7 @@ import { createApp } from "../dist/server/app.js";
 import { Engine } from "../dist/server/engine.js";
 const directory = await mkdtemp(path.join(os.tmpdir(), "rfc-studio-ui-"));
 const store = new Store(directory);
+if (!process.argv.includes("--empty")) {
 store.saveModel({
   ...DEFAULT_MODEL,
   apiKey: "ui-fixture-key",
@@ -19,6 +20,7 @@ store.saveGroup(
     rules: JSON.parse(await readFile("examples/checklist.json", "utf8")),
   }),
 );
+}
 const engine = new Engine(store, () => ({
   async review(ctx) {
     for (const item of ctx.pending) {

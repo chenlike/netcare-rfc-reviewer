@@ -39,7 +39,7 @@ export function desktopSession(secret?: string) {
         ?.slice(12) || "";
     if (equal(cookie)) return true;
     res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ error: "请从 RFC Studio 桌面窗口访问" }));
+    res.end(JSON.stringify({ error: "请从 Netcare RFC方案审核工具 桌面窗口访问" }));
     return false;
   };
 }

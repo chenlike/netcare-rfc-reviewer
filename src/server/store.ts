@@ -130,6 +130,22 @@ export class Store {
       .run("preferences", JSON.stringify(value));
     return value;
   }
+  onboarding() {
+    const completed = this.db.prepare("SELECT value FROM settings WHERE id=?").get("onboardingCompleted");
+    return {
+      completed: completed?.value === "true",
+      modelReady: this.model().hasApiKey === true,
+      rulesReady: this.groups().some((group) => group.rules.some((rule) => rule.enabled)),
+    };
+  }
+  completeOnboarding() {
+    const state = this.onboarding();
+    if (!state.modelReady || !state.rulesReady)
+      throw new Error("请先保存模型连接，并配置至少一条启用的审核规则");
+    this.db.prepare("INSERT INTO settings VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value")
+      .run("onboardingCompleted", "true");
+    return this.onboarding();
+  }
   model(secret = false): ModelSettings {
     const row = this.db
       .prepare("SELECT value FROM settings WHERE id=?")

@@ -258,7 +258,11 @@ function mayLeave() {
   }
   return true;
 }
-defineExpose({ mayLeave });
+function openUpload() {
+  selected.value = "";
+  uploadOpen.value = true;
+}
+defineExpose({ mayLeave, openUpload });
 async function remove(task: Task) {
   try {
     await confirmAction(

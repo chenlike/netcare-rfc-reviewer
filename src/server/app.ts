@@ -143,7 +143,12 @@ export function createApp(
             directory: store.directory,
             desktop: !!options.desktopSecret,
             preferences: store.preferences(),
+            onboarding: store.onboarding(),
           });
+        if (p === "/api/onboarding" && req.method === "GET")
+          return send(store.onboarding());
+        if (p === "/api/onboarding/complete" && req.method === "POST")
+          return send(store.completeOnboarding());
         if (p === "/api/preferences" && req.method === "PUT") {
           const value = await json(req);
           if (!["light", "dark", "system"].includes(value?.theme))

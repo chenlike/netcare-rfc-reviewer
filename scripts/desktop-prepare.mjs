@@ -48,7 +48,7 @@ await writeFile(
   `Bundled runtime: ${notice}Node.js: https://nodejs.org/\nDependencies retain their LICENSE files in node_modules.\n`,
 );
 // 工程内生成矢量风格图标，不依赖远程图片或设计工具。
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256"><rect width="256" height="256" rx="58" fill="#242424"/><path d="M70 54h71c41 0 62 20 62 54 0 25-13 42-36 49l40 48h-44l-36-44h-20v44H70zm37 33v42h30c19 0 29-7 29-21s-10-21-29-21z" fill="white"/></svg>`;
+const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256"><rect width="256" height="256" rx="58" fill="#242424"/><path d="M64 202V54h37l54 87V54h37v148h-36l-55-89v89z" fill="white"/></svg>`;
 const png = await sharp(Buffer.from(svg)).png().toBuffer();
 const header = Buffer.alloc(22);
 header.writeUInt16LE(1, 2);

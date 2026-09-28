@@ -3,12 +3,15 @@ import { mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { Store } from "./store.js";
 import { createApp } from "./app.js";
 import { createInterface } from "node:readline";
+import { migrateLegacyData } from "./data-migration.js";
 
 const desktop = process.env.STUDIO_DESKTOP === "1";
 const desktopSecret = desktop ? process.env.STUDIO_DESKTOP_SECRET : undefined;
 if (desktop && (!desktopSecret || !process.env.DATA_DIRECTORY))
   throw new Error("桌面运行参数缺失");
 const directory = path.resolve(process.env.DATA_DIRECTORY || ".data");
+if (desktop && await migrateLegacyData(directory, process.env.STUDIO_LEGACY_DATA_DIRECTORY))
+  console.log(JSON.stringify({ event: "data_migrated", directory, message: "旧版配置已迁移，原目录保留作备份" }));
 mkdirSync(directory, { recursive: true, mode: 0o700 });
 const lock = path.join(directory, "instance.lock");
 try {
@@ -62,7 +65,7 @@ server.listen(port, "127.0.0.1", () => {
     );
   else
     console.log(
-      `RFC 审核工作台：http://127.0.0.1:${port}\n数据目录：${directory}`,
+      `Netcare RFC方案审核工具：http://127.0.0.1:${port}\n数据目录：${directory}`,
     );
   engine.recover();
 });

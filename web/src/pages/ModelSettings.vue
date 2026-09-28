@@ -24,6 +24,7 @@ const showKey = ref(false),
 import { api, save } from "../api";
 import type { ModelSettings } from "../types/rfcAudit";
 defineProps<{ directory: string }>();
+const emit = defineEmits<{ changed: [] }>();
 const model = ref<ModelSettings>(),
   busy = ref(false),
   testing = ref(false),
@@ -44,6 +45,7 @@ async function submit(clearKey = false) {
     baseline.value = JSON.stringify(model.value);
     testResult.value = undefined;
     testError.value = "";
+    emit("changed");
     notify.success(
       clearKey ? "已清除 API Key" : "模型配置已保存，下次启动审核时生效",
     );
@@ -249,16 +251,6 @@ defineExpose({ mayLeave });
                   { value: 'high', label: '高' },
                   { value: 'max', label: '最大' },
                 ]"
-              />
-            </div>
-            <div class="field">
-              <label for="concurrency">同时审核方案数</label
-              ><Input
-                id="concurrency"
-                v-model.number="model.concurrency"
-                type="number"
-                min="1"
-                max="8"
               />
             </div>
             <div class="field">
