@@ -7,7 +7,17 @@ import {
   ref,
   watch,
 } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { notify, confirmAction } from "@/lib/feedback";
+import { Button } from "@/components/ui/button";
+import {
+  ArrowLeft,
+  Download,
+  RotateCw,
+  Sparkles,
+  ChevronUp,
+  ChevronDown,
+  GripVertical,
+} from "lucide-vue-next";
 import { api, statusText } from "../api";
 import type { Detail, RfcAuditCheck } from "../types/rfcAudit";
 import RfcDocumentPreview from "../components/RfcDocumentPreview.vue";
@@ -173,7 +183,7 @@ async function toggle() {
 async function action(name: "cancel" | "retry") {
   try {
     if (name === "cancel")
-      await ElMessageBox.confirm(
+      await confirmAction(
         "停止当前审核？已提交的结果会保留，之后可继续。",
         "停止审核",
         { type: "warning" },
@@ -182,7 +192,7 @@ async function action(name: "cancel" | "retry") {
     await api(`/tasks/${props.id}/${name}`, { method: "POST" });
     await refresh();
   } catch (e: any) {
-    if (e instanceof Error) ElMessage.error(e.message);
+    if (e instanceof Error) notify.error(e.message);
   } finally {
     busy.value = false;
   }
@@ -199,14 +209,22 @@ const resultLabel = (c: RfcAuditCheck) =>
 <template>
   <div class="review-page">
     <header class="review-toolbar">
-      <button class="back-button" @click="emit('back')">← 任务列表</button
+      <button class="back-button" @click="emit('back')">
+        <ArrowLeft :size="16" />返回</button
       ><span class="review-title" :title="detail?.Task.Title">{{
         detail?.Task.Title || "正在加载方案…"
       }}</span
-      ><a :href="`/api/tasks/${id}/download`" class="toolbar-link">下载方案</a
-      ><button class="text-button" @click="preview?.reload()">重新加载</button>
+      ><a :href="`/api/tasks/${id}/download`" class="toolbar-link"
+        ><Download :size="15" />下载</a
+      ><button
+        class="text-button"
+        @click="preview?.reload()"
+        aria-label="重新加载方案"
+      >
+        <RotateCw :size="15" />
+      </button>
     </header>
-    <el-alert v-if="error" :title="error" type="error" :closable="false" />
+    <div v-if="error" class="error-banner" role="alert">{{ error }}</div>
     <div ref="stage" class="review-stage">
       <RfcDocumentPreview
         v-if="detail"
@@ -237,7 +255,7 @@ const resultLabel = (c: RfcAuditCheck) =>
           @pointercancel="endDrag"
           @lostpointercapture="endDrag"
         >
-          <span class="agent-icon">✧</span>
+          <span class="agent-icon"><Sparkles :size="18" /></span>
           <div>
             <b>方案审核</b
             ><small
@@ -252,7 +270,10 @@ const resultLabel = (c: RfcAuditCheck) =>
             :title="collapsed ? '展开' : '收起'"
             @click="toggle"
           >
-            {{ collapsed ? "＋" : "−" }}
+            <ChevronDown v-if="collapsed" :size="17" /><ChevronUp
+              v-else
+              :size="17"
+            />
           </button>
         </header>
         <template v-if="!collapsed">
@@ -261,21 +282,20 @@ const resultLabel = (c: RfcAuditCheck) =>
               statusText(detail.Task.Status)
             }}</span>
             <div class="actions">
-              <el-button
+              <Button
                 v-if="running"
-                text
-                size="small"
-                :loading="busy"
+                variant="ghost"
+                size="sm"
+                :disabled="busy"
                 @click="action('cancel')"
-                >停止</el-button
-              ><el-button
+                >停止</Button
+              ><Button
                 v-else-if="['failed', 'cancelled'].includes(detail.Task.Status)"
-                text
-                type="primary"
-                size="small"
-                :loading="busy"
+                variant="ghost"
+                size="sm"
+                :disabled="busy"
                 @click="action('retry')"
-                >继续审核</el-button
+                >继续审核</Button
               ><a :href="`/api/tasks/${id}/report`" class="subtle-link"
                 >导出结果</a
               >

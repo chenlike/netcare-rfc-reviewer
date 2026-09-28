@@ -12,6 +12,7 @@ import {
   type TaskRecord,
 } from "./store.js";
 import { Engine } from "./engine.js";
+import { desktopSession } from "./desktop-session.js";
 
 const MIME: Record<string, string> = {
   ".html": "text/html",
@@ -52,8 +53,13 @@ const summary = ({ Checklist, Documents, Warnings, ...task }: TaskRecord) => ({
 });
 
 /** HTTP 仅面向回环地址；每次启动的随机令牌阻止其他网页触发本地修改和模型消费。 */
-export function createApp(store: Store, engine = new Engine(store)) {
+export function createApp(
+  store: Store,
+  engine = new Engine(store),
+  options: { desktopSecret?: string } = {},
+) {
   const token = randomBytes(32).toString("hex");
+  const allowSession = desktopSession(options.desktopSecret);
   const webRoot = fileURLToPath(new URL("../web/", import.meta.url));
   const server = http.createServer(async (req, res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -70,6 +76,7 @@ export function createApp(store: Store, engine = new Engine(store)) {
         return send({ error: "仅允许本机访问" }, 403);
       const url = new URL(req.url || "/", `http://${host}`),
         p = url.pathname;
+      if (!allowSession(req, res, url)) return;
       if (p.startsWith("/api/")) {
         res.setHeader("Cache-Control", "no-store");
         const origin = req.headers.origin;
@@ -92,7 +99,15 @@ export function createApp(store: Store, engine = new Engine(store)) {
             token,
             modelReady: store.model().hasApiKey,
             directory: store.directory,
+            desktop: !!options.desktopSecret,
+            preferences: store.preferences(),
           });
+        if (p === "/api/preferences" && req.method === "PUT") {
+          const value = await json(req);
+          if (!["light", "dark", "system"].includes(value?.theme))
+            throw new Error("无效的主题设置");
+          return send(store.savePreferences({ theme: value.theme }));
+        }
         if (p === "/api/model" && req.method === "GET")
           return send(store.model());
         if (p === "/api/model" && req.method === "PUT") {

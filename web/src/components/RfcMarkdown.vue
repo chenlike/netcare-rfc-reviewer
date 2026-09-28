@@ -27,24 +27,24 @@ const html = computed(() => {
 </script>
 
 <style scoped>
-.rfc-markdown { color: #4e5969; font-size: 13px; line-height: 1.75; overflow-wrap: anywhere; }
+.rfc-markdown { color: var(--foreground); font-size: 13px; line-height: 1.75; overflow-wrap: anywhere; }
 .rfc-markdown :deep(p) { margin: 0 0 8px; }
-.rfc-markdown :deep(h1), .rfc-markdown :deep(h2), .rfc-markdown :deep(h3), .rfc-markdown :deep(h4), .rfc-markdown :deep(h5), .rfc-markdown :deep(h6) { margin: 12px 0 6px; font-size: 14px; line-height: 1.5; font-weight: 600; color: #1f2329; }
+.rfc-markdown :deep(h1), .rfc-markdown :deep(h2), .rfc-markdown :deep(h3), .rfc-markdown :deep(h4), .rfc-markdown :deep(h5), .rfc-markdown :deep(h6) { margin: 12px 0 6px; font-size: 14px; line-height: 1.5; font-weight: 600; color: var(--foreground); }
 .rfc-markdown :deep(ul), .rfc-markdown :deep(ol) { margin: 6px 0 10px; padding-left: 22px; }
 .rfc-markdown :deep(ul) { list-style: disc; }
 .rfc-markdown :deep(ol) { list-style: decimal; }
 .rfc-markdown :deep(li) { margin: 4px 0; }
-.rfc-markdown :deep(strong) { font-weight: 600; color: #1f2329; }
+.rfc-markdown :deep(strong) { font-weight: 600; color: var(--foreground); }
 .rfc-markdown :deep(em) { font-style: italic; }
-.rfc-markdown :deep(code) { padding: 2px 4px; border-radius: 4px; background: #eff1f5; font-family: Consolas, monospace; font-size: 12px; }
-.rfc-markdown :deep(pre) { margin: 8px 0; padding: 10px; border: 1px solid #e5e7eb; border-radius: 6px; background: #f5f6f8; overflow: auto; white-space: pre; }
+.rfc-markdown :deep(code) { padding: 2px 4px; border-radius: 4px; background: var(--muted); font-family: Consolas, monospace; font-size: 12px; }
+.rfc-markdown :deep(pre) { margin: 8px 0; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--muted); overflow: auto; white-space: pre; }
 .rfc-markdown :deep(pre code) { padding: 0; background: none; }
-.rfc-markdown :deep(blockquote) { margin: 8px 0; padding: 4px 10px; border-left: 3px solid #b8c9ee; color: #646a73; }
+.rfc-markdown :deep(blockquote) { margin: 8px 0; padding: 4px 10px; border-left: 3px solid var(--border); color: var(--muted-foreground); }
 .rfc-markdown :deep(table) { display: block; max-width: 100%; overflow-x: auto; margin: 8px 0; border-collapse: collapse; }
-.rfc-markdown :deep(th), .rfc-markdown :deep(td) { padding: 6px 8px; border: 1px solid #e5e7eb; min-width: 70px; }
-.rfc-markdown :deep(th) { background: #f5f6f8; font-weight: 600; }
-.rfc-markdown :deep(a) { color: #4268d5; text-decoration: underline; }
-.rfc-markdown :deep(hr) { margin: 12px 0; border: 0; border-top: 1px solid #e5e7eb; }
+.rfc-markdown :deep(th), .rfc-markdown :deep(td) { padding: 6px 8px; border: 1px solid var(--border); min-width: 70px; }
+.rfc-markdown :deep(th) { background: var(--muted); font-weight: 600; }
+.rfc-markdown :deep(a) { color: var(--foreground); text-decoration: underline; }
+.rfc-markdown :deep(hr) { margin: 12px 0; border: 0; border-top: 1px solid var(--border); }
 .rfc-markdown :deep(> :first-child) { margin-top: 0; }
 .rfc-markdown :deep(> :last-child) { margin-bottom: 0; }
 .compact { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; pointer-events: none; }

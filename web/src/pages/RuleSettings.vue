@@ -1,6 +1,23 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { notify, confirmAction } from "@/lib/feedback";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
+import SelectField from "@/components/SelectField.vue";
+import {
+  Plus,
+  Upload,
+  Download,
+  Trash2,
+  ListChecks,
+  LoaderCircle,
+  Check,
+  FolderClosed,
+} from "lucide-vue-next";
+
 import { api, save, downloadJson } from "../api";
 import type { Rule, RuleGroup } from "../types/rfcAudit";
 const groups = ref<RuleGroup[]>([]),
@@ -11,7 +28,7 @@ const groups = ref<RuleGroup[]>([]),
 async function load() {
   groups.value = await api("/groups");
 }
-onMounted(() => load().catch((e) => ElMessage.error(e.message)));
+onMounted(() => load().catch((e) => notify.error(e.message)));
 function emptyRule(): Rule {
   return {
     Id: crypto.randomUUID(),
@@ -25,11 +42,9 @@ function emptyRule(): Rule {
 async function mayLeave() {
   if (!dirty.value) return true;
   try {
-    await ElMessageBox.confirm(
-      "当前修改尚未保存，是否放弃修改？",
-      "未保存的规则",
-      { type: "warning" },
-    );
+    await confirmAction("当前修改尚未保存，是否放弃修改？", "未保存的规则", {
+      type: "warning",
+    });
     return true;
   } catch {
     return false;
@@ -61,9 +76,9 @@ async function submit() {
     );
     dirty.value = false;
     await load();
-    ElMessage.success("规则已保存；已有任务保留创建时的规则快照");
+    notify.success("规则已保存；已有任务保留创建时的规则快照");
   } catch (e: any) {
-    ElMessage.error(e.message);
+    notify.error(e.message);
   } finally {
     busy.value = false;
   }
@@ -71,7 +86,7 @@ async function submit() {
 async function remove() {
   if (!draft.value?.id) return;
   try {
-    await ElMessageBox.confirm(
+    await confirmAction(
       "删除此规则组？已有任务及其审核结果会保留。",
       "删除规则组",
       { type: "warning" },
@@ -81,7 +96,7 @@ async function remove() {
     dirty.value = false;
     await load();
   } catch (e: any) {
-    if (e instanceof Error) ElMessage.error(e.message);
+    if (e instanceof Error) notify.error(e.message);
   }
 }
 async function importRules(event: Event) {
@@ -108,9 +123,9 @@ async function importRules(event: Event) {
       })),
     };
     dirty.value = true;
-    ElMessage.success("已导入，请检查后保存");
+    notify.success("已导入，请检查后保存");
   } catch (e: any) {
-    ElMessage.error(e.message);
+    notify.error(e.message);
   } finally {
     (event.target as HTMLInputElement).value = "";
   }
@@ -121,13 +136,14 @@ defineExpose({ mayLeave });
   <section class="page rule-page">
     <header class="page-heading">
       <div>
-        <div class="eyebrow">REVIEW STANDARDS</div>
-        <h1>规则配置</h1>
-        <p>按场景组织检查项，每个任务使用创建时的规则快照。</p>
+        <div class="eyebrow">工作空间 / 审核标准</div>
+        <h1>审核规则</h1>
+        <p>把经验变成标准，让每一次审核都有章可循。</p>
       </div>
       <div class="actions">
-        <el-button @click="importInput?.click()">导入 JSON</el-button
-        ><el-button type="primary" @click="add">新建规则组</el-button>
+        <Button variant="outline" @click="importInput?.click()"
+          ><Upload />导入 JSON</Button
+        ><Button @click="add"><Plus />新建规则组</Button>
       </div>
     </header>
     <input
@@ -138,9 +154,9 @@ defineExpose({ mayLeave });
       @change="importRules"
     />
     <div class="rule-layout">
-      <aside class="card group-list">
+      <aside class="group-list">
         <div class="section-caption">
-          规则组 <span>{{ groups.length }}</span>
+          规则组<span>{{ groups.length }}</span>
         </div>
         <button
           v-for="group in groups"
@@ -148,32 +164,50 @@ defineExpose({ mayLeave });
           :class="{ selected: draft?.id === group.id }"
           @click="select(group)"
         >
-          <span>{{ group.name }}</span
-          ><small>{{ group.rules.filter((r) => r.enabled).length }} 项</small>
+          <FolderClosed :size="16" /><span>{{ group.name }}</span
+          ><small>{{ group.rules.filter((r) => r.enabled).length }}</small>
         </button>
         <p v-if="!groups.length" class="empty-hint">
-          新建一个规则组，或导入已有规则。
+          还没有规则组。<br />新建或导入一组标准。
         </p>
+        <div class="group-foot">新任务使用最新规则，已有任务保留规则快照。</div>
       </aside>
       <div v-if="draft" class="rule-editor">
-        <div class="card editor-heading">
-          <el-input
-            v-model="draft.name"
-            maxlength="100"
-            placeholder="规则组名称"
-            @input="dirty = true"
-          />
+        <div class="editor-heading">
+          <div class="editor-title">
+            <label class="sr-only" for="group-name">规则组名称</label
+            ><Input
+              id="group-name"
+              v-model="draft.name"
+              maxlength="100"
+              placeholder="规则组名称"
+              @input="dirty = true"
+            /><span class="muted"
+              >{{ draft.rules.length }} 项检查<span v-if="dirty">
+                · 未保存</span
+              ></span
+            >
+          </div>
           <div class="actions">
-            <span v-if="dirty" class="muted">未保存</span
-            ><el-button
+            <Button
               v-if="draft.id"
-              text
+              variant="ghost"
+              size="icon-sm"
+              aria-label="导出规则组"
               @click="downloadJson(draft, draft.name + '.json')"
-              >导出</el-button
-            ><el-button v-if="draft.id" text type="danger" @click="remove"
-              >删除组</el-button
-            ><el-button type="primary" :loading="busy" @click="submit"
-              >保存规则</el-button
+              ><Download /></Button
+            ><Button
+              v-if="draft.id"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="删除规则组"
+              class="delete-action"
+              @click="remove"
+              ><Trash2 /></Button
+            ><Button :disabled="busy" size="sm" @click="submit"
+              ><LoaderCircle v-if="busy" class="animate-spin" /><Check
+                v-else
+              />保存规则</Button
             >
           </div>
         </div>
@@ -181,61 +215,74 @@ defineExpose({ mayLeave });
           v-for="(rule, index) in draft.rules"
           :key="rule.Id"
           class="card rule-card"
+          :class="{ 'rule-disabled': !rule.enabled }"
         >
           <div class="rule-card-heading">
             <span class="rule-number">{{
               String(index + 1).padStart(2, "0")
             }}</span
-            ><el-input
+            ><Input
               v-model="rule.Title"
+              :aria-label="`第 ${index + 1} 项标题`"
               placeholder="检查项标题"
               @input="dirty = true"
-            /><el-switch
+            /><Switch
               v-model="rule.enabled"
-              inline-prompt
-              active-text="启用"
-              inactive-text="停用"
-              @change="dirty = true"
-            /><el-button
-              text
-              type="danger"
+              :aria-label="`启用第 ${index + 1} 项`"
+              @update:model-value="dirty = true"
+            /><Button
+              variant="ghost"
+              size="icon-sm"
+              :aria-label="`删除第 ${index + 1} 项`"
+              class="delete-action"
               @click="
                 draft.rules.splice(index, 1);
                 dirty = true;
               "
-              >删除</el-button
-            >
+              ><Trash2 :size="15"
+            /></Button>
           </div>
-          <el-input
+          <Textarea
             v-model="rule.Description"
-            type="textarea"
-            :autosize="{ minRows: 3, maxRows: 12 }"
-            placeholder="描述检查标准，以及应当核验的证据……"
+            :aria-label="`第 ${index + 1} 项检查标准`"
+            :rows="3"
+            placeholder="描述检查标准，以及应当核验的证据…"
             @input="dirty = true"
           />
           <div class="rule-meta">
-            <el-select v-model="rule.Level" @change="dirty = true"
-              ><el-option label="必要" value="必要" /><el-option
-                label="建议"
-                value="建议" /></el-select
-            ><el-input
+            <SelectField
+              v-model="rule.Level"
+              label="规则等级"
+              :options="[
+                { value: '必要', label: '必要' },
+                { value: '建议', label: '建议' },
+              ]"
+              @update:model-value="dirty = true"
+            /><Input
               v-model="rule.Chapter"
+              aria-label="相关章节"
               placeholder="相关章节（可选）"
               @input="dirty = true"
             />
           </div>
         </div>
-        <el-button
+        <Button
+          variant="outline"
           class="add-rule"
           @click="
             draft.rules.push(emptyRule());
             dirty = true;
           "
-          >＋ 添加检查项</el-button
+          ><Plus />添加检查项</Button
         >
       </div>
-      <div v-else class="card rule-empty">
-        <el-empty description="选择规则组，开始编辑审核标准" />
+      <div v-else class="rule-empty empty-state">
+        <div class="empty-icon">
+          <ListChecks :size="28" :stroke-width="1.4" />
+        </div>
+        <h2>好的审核，从清晰的规则开始</h2>
+        <p>选择左侧规则组，或为一个新场景创建审核标准。</p>
+        <Button variant="outline" @click="add"><Plus />创建规则组</Button>
       </div>
     </div>
   </section>

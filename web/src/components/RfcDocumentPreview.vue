@@ -1,16 +1,17 @@
 <template>
-    <section class="document-preview" v-loading="state.loading">
-        <el-alert v-if="state.error" :title="state.error" type="error" :closable="false" />
+    <section class="document-preview">
+        <div v-if="state.loading" class="preview-loading"><LoaderCircle class="animate-spin" :size="22" />正在准备方案…</div><div v-if="state.error" class="error-banner" role="alert">{{ state.error }}</div>
         <div v-if="state.warnings.length" class="preview-note">{{ state.warnings.join('；') }}</div>
         <iframe v-if="state.html" ref="frame" class="preview-frame" :srcdoc="state.html" sandbox="allow-same-origin"
             referrerpolicy="no-referrer" title="RFC 方案文档预览" @load="onFrameLoaded" />
-        <el-empty v-else-if="!state.loading && !state.error" description="暂无可预览的 HTML 方案" />
+        <div v-else-if="!state.loading && !state.error" class="empty-state">暂无可预览的 HTML 方案</div>
     </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { notify } from '@/lib/feedback'
+import { LoaderCircle } from 'lucide-vue-next'
 import { downloadPackage } from '../api'
 import type { RfcAuditCheck, RfcAuditDocument } from '@/types/rfcAudit'
 import { buildRfcPreview, clearRfcHighlight, locateRfcFinding, type RfcPreview } from './rfcPreview'
@@ -159,7 +160,7 @@ watch(() => props.taskId, () => {
 }, { immediate: true })
 watch([() => props.finding, () => props.findingKey], () => { void focusFinding() })
 watch(() => state.locationMessage, message => {
-    if (message && props.finding?.Status === 'completed') ElMessage({ message, type: 'info', grouping: true, duration: 3500 })
+    if (message && props.finding?.Status === 'completed') notify.info({ message, duration: 3500 })
 })
 defineExpose({ focusFinding, reload: loadSelectedPage, loading: computed(() => state.loading) })
 onBeforeUnmount(() => { generation++; controller?.abort(); preview?.dispose(); releaseArchive() })
@@ -168,5 +169,5 @@ onBeforeUnmount(() => { generation++; controller?.abort(); preview?.dispose(); r
 <style scoped>
 .document-preview { display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
 .preview-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: #fff; }
-.preview-note { padding: 8px 12px; color: #909399; font-size: 12px; line-height: 1.5; border-top: 1px solid #ebeef5; background: #fafbfc; }
+.preview-note { padding: 8px 12px; color: var(--muted-foreground); font-size: 12px; line-height: 1.5; border-top: 1px solid var(--border); background: var(--muted); }
 </style>

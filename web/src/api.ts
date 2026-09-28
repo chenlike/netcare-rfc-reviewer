@@ -4,6 +4,8 @@ export async function bootstrap() {
     token: string;
     modelReady: boolean;
     directory: string;
+    desktop: boolean;
+    preferences: { theme: 'light' | 'dark' | 'system' };
   }>("/bootstrap");
   token = result.token;
   return result;

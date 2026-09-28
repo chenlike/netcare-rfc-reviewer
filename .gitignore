@@ -5,3 +5,8 @@ dist/
 *.log
 *.tsbuildinfo
 test-results/
+.desktop-tools/
+src-tauri/target/
+src-tauri/runtime/
+release/
+src-tauri/gen/

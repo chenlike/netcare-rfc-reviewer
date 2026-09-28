@@ -115,6 +115,20 @@ export class Store {
       decipher.final(),
     ]).toString("utf8");
   }
+  preferences(): { theme: "light" | "dark" | "system" } {
+    const row = this.db
+      .prepare("SELECT value FROM settings WHERE id=?")
+      .get("preferences") as { value: string } | undefined;
+    return row ? JSON.parse(row.value) : { theme: "system" };
+  }
+  savePreferences(value: { theme: "light" | "dark" | "system" }) {
+    this.db
+      .prepare(
+        "INSERT INTO settings VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value",
+      )
+      .run("preferences", JSON.stringify(value));
+    return value;
+  }
   model(secret = false): ModelSettings {
     const row = this.db
       .prepare("SELECT value FROM settings WHERE id=?")

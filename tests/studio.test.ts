@@ -314,6 +314,32 @@ test("standalone HTTP upload → real pi-agent tools → persisted results throu
     "X-Studio-Token": boot.token,
     "Content-Type": "application/json",
   };
+  assert.deepEqual(boot.preferences, { theme: "system" });
+  assert.equal(
+    (
+      await fetch(base + "/api/preferences", {
+        method: "PUT",
+        body: '{"theme":"dark"}',
+      })
+    ).status,
+    403,
+  );
+  const preferences = await fetch(base + "/api/preferences", {
+    method: "PUT",
+    headers,
+    body: '{"theme":"dark"}',
+  });
+  assert.deepEqual(await preferences.json(), { theme: "dark" });
+  const reopenedPreferences = new Store(store.directory);
+  assert.deepEqual(reopenedPreferences.preferences(), { theme: "dark" });
+  reopenedPreferences.close();
+  const invalidPreference = await fetch(base + "/api/preferences", {
+    method: "PUT",
+    headers,
+    body: '{"theme":"invalid"}',
+  });
+  assert.notEqual(invalidPreference.status, 200);
+  assert.deepEqual(store.preferences(), { theme: "dark" });
   assert.equal(
     (await fetch(base + "/api/groups", { method: "POST", body: "{}" })).status,
     403,
