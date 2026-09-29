@@ -41,7 +41,7 @@ export interface ModelSettings {
 export const DEFAULT_MODEL: ModelSettings = {
   basePrompt: DEFAULT_RFC_PROMPT,
   baseUrl: "https://api.deepseek.com",
-  model: "deepseek-v4-flash",
+  model: "deepseek-flash",
   provider: "deepseek",
   supportsImages: true,
   thinkingLevel: "low",
@@ -126,7 +126,7 @@ export class Store {
     const row = this.db
       .prepare("SELECT value FROM settings WHERE id=?")
       .get("preferences") as { value: string } | undefined;
-    return row ? JSON.parse(row.value) : { theme: "system" };
+    return row ? JSON.parse(row.value) : { theme: "dark" };
   }
   savePreferences(value: { theme: "light" | "dark" | "system" }) {
     this.db

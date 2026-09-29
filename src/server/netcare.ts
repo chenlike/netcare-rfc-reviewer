@@ -19,7 +19,7 @@ export async function limitedBody(response: Response, maximum: number): Promise<
 export class ExportLoginRequired extends Error {
   constructor() { super('方案导出服务需要连接统一登录'); }
 }
-export async function downloadHtml(number: string, credentials: IdpCredentials, signal: AbortSignal, transport: typeof fetch = fetch) {
+export async function verifyExportSession(credentials: IdpCredentials, signal: AbortSignal, transport: typeof fetch = fetch): Promise<IdpCredentials> {
   const headers = { Cookie: credentials.cookie, 'X-CSRF-TOKEN': credentials.csrfToken };
   const check = await transport(IDP_ORIGIN + '/ows1/services/sso/getloginuser', { headers, redirect:'manual', signal });
   if (!check.ok || check.status === 204) throw new ExportLoginRequired();
@@ -27,9 +27,13 @@ export async function downloadHtml(number: string, credentials: IdpCredentials, 
   try { user = JSON.parse((await limitedBody(check, 1024 * 1024)).toString('utf8')); }
   catch { throw new ExportLoginRequired(); }
   if (!user?.uid || !user?.employeeNumber || user.uid !== credentials.username) throw new ExportLoginRequired();
-  const params = new URLSearchParams({ id: validateNetcareNumber(number), username: user.uid, from:'ows' });
+  return validateIdpCredentials({ ...credentials, csrfToken: String(user.employeeNumber) });
+}
+export async function downloadHtml(number: string, credentials: IdpCredentials, signal: AbortSignal, transport: typeof fetch = fetch) {
+  const verified = await verifyExportSession(credentials, signal, transport);
+  const params = new URLSearchParams({ id: validateNetcareNumber(number), username: verified.username, from:'ows' });
   const response = await transport(`${IDP_ORIGIN}/ows1/services/ows/downloadHtmlZip?${params}`, {
-    headers: { ...headers, 'X-CSRF-TOKEN': String(user.employeeNumber) }, redirect:'manual', signal,
+    headers: { Cookie: verified.cookie, 'X-CSRF-TOKEN': verified.csrfToken }, redirect:'manual', signal,
   });
   if ([301,302,303,307,308,401,403].includes(response.status)) throw new ExportLoginRequired();
   if (!response.ok) throw new Error(`方案下载失败（HTTP ${response.status}），请稍后重试`);
@@ -93,6 +97,9 @@ export class NetcareService {
   private loginGeneration = 0;
   private loginTimer?: ReturnType<typeof setTimeout>;
   private client?: NetcareClient;
+  private loginController?: AbortController;
+  private pendingLogin?: { credentials: NetcareCredentials; client: NetcareClient };
+  private verifyingExport = false;
   private exportWait?: { id: string; resolve: (value: IdpCredentials) => void; reject: (error: Error) => void };
   private downloadController?: AbortController;
   constructor(directory: string, readonly desktop: boolean, private emit = (value: unknown) => console.log(JSON.stringify(value))) {
@@ -106,7 +113,9 @@ export class NetcareService {
     if (this.state === 'downloading') throw new Error('正在导入方案，请稍后再登录');
     if (this.state === 'verifying' || this.state === 'login') return;
     const generation = ++this.loginGeneration;
-    this.state = 'login'; this.message = '请在弹窗中登录，成功后窗口会自动关闭';
+    this.loginController = new AbortController();
+    this.pendingLogin = undefined; this.verifyingExport = false;
+    this.state = 'login'; this.message = '请在弹窗中登录，查询与下载服务均连接成功后会自动关闭';
     if (clear) { this.client = undefined; await this.session.forget(); }
     if (generation !== this.loginGeneration) return;
     clearTimeout(this.loginTimer);
@@ -133,19 +142,35 @@ export class NetcareService {
       return;
     }
     if (value.event === 'netcare_login_error') { this.cancelLogin('登录窗口未能完成连接，请重试'); return; }
+    if (value.event === 'netcare_login_export_credentials') {
+      if (this.state !== 'verifying' || !this.pendingLogin || this.verifyingExport) return;
+      const generation = this.loginGeneration, pending = this.pendingLogin;
+      this.verifyingExport = true;
+      try {
+        const idp = await verifyExportSession(validateIdpCredentials(value), AbortSignal.any([this.loginController!.signal, AbortSignal.timeout(60000)]));
+        if (generation !== this.loginGeneration) return;
+        await this.session.save({ ...pending.credentials, idp });
+        if (generation !== this.loginGeneration) return;
+        this.client = pending.client; this.pendingLogin = undefined;
+        this.state = 'ready'; this.message = 'Netcare 与方案下载服务均已连接，登录会话已保存';
+        clearTimeout(this.loginTimer);
+        this.emit({ event:'netcare_login_complete' });
+      } catch {
+        if (generation === this.loginGeneration) this.message = 'Netcare 已连接，方案下载服务尚未验证成功，请保留当前弹窗，系统将重试';
+      } finally { if (generation === this.loginGeneration) this.verifyingExport = false; }
+      return;
+    }
     if (value.event !== 'netcare_credentials' || this.state !== 'login') return;
     const generation = this.loginGeneration;
     this.state = 'verifying'; this.message = '正在验证登录会话…';
     try {
       const credentials = validateCredentials(value);
       const client = new NetcareClient(credentials);
-      await client.query('NE00000000000000');
+      await client.query('NE00000000000000', this.loginController!.signal);
       if (generation !== this.loginGeneration) return;
-      await this.session.save(credentials);
-      this.client = client;
-      this.state = 'ready'; this.message = '已连接 Netcare，登录会话已保存';
-      clearTimeout(this.loginTimer);
-      this.emit({ event: 'netcare_login_complete' });
+      this.pendingLogin = { credentials, client };
+      this.message = 'Netcare 已连接，正在同一窗口连接方案下载服务；如华为要求验证，请在该窗口完成';
+      this.emit({ event:'netcare_login_export', requestId:String(generation) });
     } catch (error) {
       if (generation !== this.loginGeneration) return;
       this.state = 'login';
@@ -155,6 +180,7 @@ export class NetcareService {
   cancelLogin(message = '已取消登录') {
     if (this.state === 'downloading') { this.downloadController?.abort(); return; }
     this.loginGeneration++;
+    this.loginController?.abort(); this.pendingLogin = undefined; this.verifyingExport = false;
     clearTimeout(this.loginTimer);
     this.state = 'disconnected'; this.message = message;
     this.emit({ event: 'netcare_login_cancel' });
@@ -224,5 +250,5 @@ export class NetcareService {
       throw new Error(this.message);
     } finally { this.downloadController = undefined; }
   }
-  close() { clearTimeout(this.loginTimer); this.loginGeneration++; this.downloadController?.abort(); }
+  close() { clearTimeout(this.loginTimer); this.loginGeneration++; this.loginController?.abort(); this.pendingLogin = undefined; this.downloadController?.abort(); }
 }

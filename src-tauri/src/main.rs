@@ -157,6 +157,16 @@ fn start_runtime(
     std::thread::spawn(move || {
         for line in BufReader::new(output).lines().map_while(Result::ok) {
             if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
+                if value["event"] == "netcare_login_export" {
+                    let app = event_app.clone(); let state = event_state.clone();
+                    let id = value["requestId"].as_str().unwrap_or("").to_string();
+                    let _ = event_app.run_on_main_thread(move || {
+                        if netcare::connect_export(&app).is_err() {
+                            state.send(&serde_json::json!({"event":"netcare_login_error","requestId":id}));
+                        }
+                    });
+                    continue;
+                }
                 if value["event"] == "netcare_export_login" {
                     let app = event_app.clone(); let state = event_state.clone();
                     let id = value["requestId"].as_str().unwrap_or("").to_string();

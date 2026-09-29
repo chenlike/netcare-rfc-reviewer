@@ -1,8 +1,8 @@
 import { ref, watch } from "vue";
 import { save } from "../api";
 export type Theme = "light" | "dark" | "system";
-export const theme = ref<Theme>("system");
-export const resolvedTheme = ref<"light" | "dark">("light");
+export const theme = ref<Theme>("dark");
+export const resolvedTheme = ref<"light" | "dark">("dark");
 const media = window.matchMedia("(prefers-color-scheme: dark)");
 function apply() {
   resolvedTheme.value =
@@ -13,7 +13,7 @@ function apply() {
   );
   document.documentElement.style.colorScheme = resolvedTheme.value;
 }
-export function initializeTheme(value: Theme = "system") {
+export function initializeTheme(value: Theme = "dark") {
   theme.value = value;
   apply();
 }

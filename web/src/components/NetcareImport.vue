@@ -65,7 +65,7 @@ async function importPlan() {
         <div v-if="!session.available" class="error-banner">请在桌面程序中使用 Netcare 登录与导入。</div>
         <div class="rounded-md border p-3 grid gap-3">
           <p class="text-sm" role="status">{{ session.message || (session.cached ? '已保存登录会话，导入时会检查是否有效' : '尚未连接 Netcare') }}</p>
-          <p class="text-xs text-muted-foreground">在软件弹窗中手动登录，成功后自动关闭。登录会话保存在本机。</p>
+          <p class="text-xs text-muted-foreground">在同一软件弹窗中完成登录，查询与下载服务均连接成功后自动关闭。登录会话保存在本机。</p>
           <div class="flex gap-2">
             <Button v-if="!connecting" variant="outline" size="sm" :disabled="busy || !session.available" @click="login()"><LogIn />{{ session.cached ? '重新连接' : '登录 Netcare' }}</Button>
             <Button v-if="!connecting && session.cached" variant="ghost" size="sm" :disabled="busy" @click="login(true)">切换账号</Button>

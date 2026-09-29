@@ -316,7 +316,7 @@ test("standalone HTTP upload → real pi-agent tools → persisted results throu
     "X-Studio-Token": boot.token,
     "Content-Type": "application/json",
   };
-  assert.deepEqual(boot.preferences, { theme: "system" });
+  assert.deepEqual(boot.preferences, { theme: "dark" });
   assert.equal(
     (
       await fetch(base + "/api/preferences", {

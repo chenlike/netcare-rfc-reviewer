@@ -172,6 +172,78 @@ test('failed or cancelled native login never saves an unverified session or clos
   service.cancelLogin(); service.close();
 });
 
+test('login is ready only after both services validate, and first download does not open another login', async t => {
+  const directory = await temporaryDirectory(t);
+  await writeFile(path.join(directory,'master.key'),randomBytes(32));
+  const events: any[] = [];
+  const service = new NetcareService(directory,true,e=>events.push(e));
+  t.after(()=>service.close());
+  t.mock.method(globalThis,'fetch',async (input: any, options: any) => {
+    const url = new URL(String(input));
+    if (url.origin === IDP_ORIGIN) {
+      assert.equal(new Headers(options.headers).get('cookie'),idp.cookie);
+      return url.pathname.endsWith('getloginuser') ? Response.json({uid:idp.username,employeeNumber:'fresh-csrf'}) : new Response(zipHtml());
+    }
+    assert.equal(new Headers(options.headers).get('cookie'),'netcare=secret');
+    return url.pathname.endsWith('ne_query_rfc_getList_for_report')
+      ? Response.json({results:[{orderid:'NE20260828000800',customer_org:'test'}]})
+      : Response.json({result:{configure_value:IDP_ORIGIN+'/ows1/'}});
+  });
+  await service.login();
+  const requestId = events[0].requestId;
+  await service.receive({event:'netcare_credentials',requestId,cookie:'netcare=secret',csrfToken:'csrf'});
+  assert.equal((await service.status()).state,'verifying');
+  assert.equal(await service.session.load(),undefined);
+  assert.equal(events.at(-1).event,'netcare_login_export');
+  assert.equal(events.some(e=>e.event==='netcare_login_complete'),false);
+  await service.receive({event:'netcare_login_export_credentials',requestId,...idp});
+  assert.equal((await service.status()).state,'ready');
+  assert.equal(events.at(-1).event,'netcare_login_complete');
+  assert.deepEqual((await service.session.load())?.idp,{...idp,csrfToken:'fresh-csrf'});
+  await service.download('NE20260828000800');
+  assert.equal(events.some(e=>e.event==='netcare_export_login'),false);
+});
+
+test('export login failure keeps the original login open and retry can complete it', async t => {
+  const directory = await temporaryDirectory(t);
+  await writeFile(path.join(directory,'master.key'),randomBytes(32));
+  const events: any[] = [];
+  const service = new NetcareService(directory,true,e=>events.push(e));
+  t.after(()=>service.close());
+  let authorized = false;
+  t.mock.method(globalThis,'fetch',async (url: any)=>String(url).startsWith(IDP_ORIGIN)
+    ? authorized ? Response.json({uid:idp.username,employeeNumber:'csrf'}) : new Response('',{status:401})
+    : Response.json({results:[]}));
+  await service.login(); const requestId = events[0].requestId;
+  await service.receive({event:'netcare_credentials',requestId,cookie:'a=b',csrfToken:'csrf'});
+  await service.receive({event:'netcare_login_export_credentials',requestId,...idp});
+  assert.equal((await service.status()).state,'verifying');
+  assert.equal(await service.session.load(),undefined);
+  assert.equal(events.some(e=>e.event==='netcare_login_complete'),false);
+  authorized = true;
+  await service.receive({event:'netcare_login_export_credentials',requestId,...idp});
+  assert.equal((await service.status()).state,'ready');
+});
+
+test('closing the combined login during export validation cannot mark it ready later', async t => {
+  const directory = await temporaryDirectory(t);
+  await writeFile(path.join(directory,'master.key'),randomBytes(32));
+  const events: any[] = [];
+  const service = new NetcareService(directory,true,e=>events.push(e));
+  t.after(()=>service.close());
+  let resolve!: (response: Response) => void;
+  const pending = new Promise<Response>(r=>{resolve=r;});
+  t.mock.method(globalThis,'fetch',async (url: any)=>String(url).startsWith(IDP_ORIGIN) ? pending : Response.json({results:[]}));
+  await service.login(); const requestId = events[0].requestId;
+  await service.receive({event:'netcare_credentials',requestId,cookie:'a=b',csrfToken:'csrf'});
+  const verification = service.receive({event:'netcare_login_export_credentials',requestId,...idp});
+  await service.receive({event:'netcare_login_closed',requestId});
+  resolve(Response.json({uid:idp.username,employeeNumber:'csrf'})); await verification;
+  assert.equal((await service.status()).state,'disconnected');
+  assert.equal(await service.session.load(),undefined);
+  assert.equal(events.some(e=>e.event==='netcare_login_complete'),false);
+});
+
 test('cancelling an export handoff closes its native window and permits retry', async t => {
   const directory = await temporaryDirectory(t);
   await writeFile(path.join(directory,'master.key'),randomBytes(32));

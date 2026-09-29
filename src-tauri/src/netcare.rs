@@ -13,8 +13,30 @@ pub fn open(app: &tauri::AppHandle, state: Arc<Runtime>, clear: bool, request_id
     let nonce = uuid::Uuid::new_v4().simple().to_string();
     let script = format!(r#"
         (() => {{
-          if (window.top !== window || location.origin !== 'https://netcare.huawei.com') return;
-          const timer = setInterval(() => {{
+          if (window.top !== window) return;
+          if (location.origin === 'https://kdp.idp.huawei.com') {{
+            if (location.pathname === '/ows1/services/sso/getloginuser') {{
+              const showStatus = () => {{
+                document.body.textContent = '正在验证方案下载服务，完成后窗口会自动关闭…';
+                document.body.style.cssText = 'font:16px system-ui;padding:32px';
+              }};
+              if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showStatus, {{once:true}});
+              else showStatus();
+            }}
+            let busy = false;
+            setInterval(async () => {{
+              if (busy) return;
+              busy = true;
+              try {{
+                const r = await fetch('/ows1/services/sso/getloginuser', {{credentials:'include'}});
+                const u = await r.json();
+                if (u.uid && u.employeeNumber) location.href = 'netcare-session://export/{nonce}?csrf=' + encodeURIComponent(u.employeeNumber) + '&username=' + encodeURIComponent(u.uid);
+              }} catch {{}} finally {{ busy = false; }}
+            }}, 2000);
+            return;
+          }}
+          if (location.origin !== 'https://netcare.huawei.com') return;
+          setInterval(() => {{
             const token = localStorage.getItem('csrfTokens');
             if (token && location.pathname.startsWith('/p/netcare/')) {{
               location.href = 'netcare-session://ready/{nonce}?csrf=' + encodeURIComponent(token);
@@ -33,10 +55,14 @@ pub fn open(app: &tauri::AppHandle, state: Arc<Runtime>, clear: bool, request_id
         .initialization_script(script)
         .on_navigation(move |url| {
             if url.scheme() == "netcare-session" {
-                if url.host_str() != Some("ready") || url.path() != format!("/{nonce}") { return false; }
+                let export = url.host_str() == Some("export");
+                if (!export && url.host_str() != Some("ready")) || url.path() != format!("/{nonce}") { return false; }
                 let Some(window) = nav_app.get_webview_window("netcare-login") else { return false; };
-                if !window.url().ok().is_some_and(|current| current.origin().ascii_serialization() == "https://netcare.huawei.com") { return false; }
+                let origin = if export { "https://kdp.idp.huawei.com" } else { "https://netcare.huawei.com" };
+                if !window.url().ok().is_some_and(|current| current.origin().ascii_serialization() == origin) { return false; }
                 let csrf = url.query_pairs().find(|(key, _)| key == "csrf").map(|(_, value)| value.into_owned());
+                let username = url.query_pairs().find(|(key, _)| key == "username").map(|(_, value)| value.into_owned());
+                if export && !username.as_ref().is_some_and(|s| !s.is_empty() && s.len() < 1024) { return false; }
                 if let Some(csrf) = csrf.filter(|s| !s.is_empty() && s.len() < 16000) {
                     if !captured.swap(true, Ordering::SeqCst) {
                         let state = nav_state.clone();
@@ -44,10 +70,12 @@ pub fn open(app: &tauri::AppHandle, state: Arc<Runtime>, clear: bool, request_id
                         let captured = captured.clone();
                         // WebView2 的同步 Cookie API 必须在事件线程之外调用。
                         std::thread::spawn(move || {
-                            match window.cookies_for_url("https://netcare.huawei.com/adc-service/".parse().unwrap()) {
+                            let cookie_url = if export { "https://kdp.idp.huawei.com/ows1/services/" } else { "https://netcare.huawei.com/adc-service/" };
+                            match window.cookies_for_url(cookie_url.parse().unwrap()) {
                                 Ok(cookies) => {
                                     let cookie = cookies.iter().map(|c| format!("{}={}", c.name(), c.value())).collect::<Vec<_>>().join("; ");
-                                    state.send(&serde_json::json!({"event":"netcare_credentials", "requestId":id,"cookie":cookie, "csrfToken":csrf}));
+                                    let event = if export { "netcare_login_export_credentials" } else { "netcare_credentials" };
+                                    state.send(&serde_json::json!({"event":event, "requestId":id,"cookie":cookie, "csrfToken":csrf,"username":username}));
                                 }
                                 Err(_) => { state.send(&serde_json::json!({"event":"netcare_login_error", "requestId":id,"message":"无法读取登录会话，请关闭窗口后重试"})); }
                             }
@@ -73,6 +101,16 @@ pub fn open(app: &tauri::AppHandle, state: Arc<Runtime>, clear: bool, request_id
 
 pub fn close(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("netcare-login") { let _ = window.close(); }
+}
+
+// 在原登录 WebView 中完成 SSO，避免先销毁窗口再创建导出窗口时丢失会话 Cookie。
+pub fn connect_export(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let window = app.get_webview_window("netcare-login").ok_or("login window closed")?;
+    window.set_title("登录 Netcare · 正在连接方案下载服务")?;
+    let mut url: tauri::Url = "https://kdp.idp.huawei.com/ows1/services/sso/login".parse()?;
+    url.query_pairs_mut().append_pair("url", "https://kdp.idp.huawei.com/ows1/services/sso/getloginuser");
+    window.navigate(url)?;
+    Ok(())
 }
 
 // 与 Netcare 共用软件内的 WebView2 配置，由统一登录完成导出服务的会话交换。
