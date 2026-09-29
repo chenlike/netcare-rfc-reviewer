@@ -15,6 +15,7 @@ import {
 } from "./store.js";
 import { Engine } from "./engine.js";
 import { desktopSession } from "./desktop-session.js";
+import { NetcareService } from './netcare.js';
 import { testModel } from "./model-test.js";
 import { report } from "./report.js";
 import { exportConfiguration, importConfiguration } from "./configuration.js";
@@ -55,6 +56,7 @@ export function createApp(
   options: { desktopSecret?: string } = {},
 ) {
   const token = randomBytes(32).toString("hex");
+  const netcare = new NetcareService(store.directory, !!options.desktopSecret);
   let maintenance = false,
     activeWrites = 0;
   const uploads = new Map<string, Promise<TaskRecord>>();
@@ -97,6 +99,16 @@ export function createApp(
             return send({ error: "页面已失效，请刷新后再试" }, 403);
           mutation = true;
           activeWrites++;
+        }
+        if (p === '/api/netcare/status' && req.method === 'GET') return send(await netcare.status());
+        if (p === '/api/netcare/login' && req.method === 'POST') {
+          const value = await json(req);
+          await netcare.login(value.clear === true);
+          return send(await netcare.status());
+        }
+        if (p === '/api/netcare/cancel' && req.method === 'POST') {
+          netcare.cancelLogin();
+          return send(await netcare.status());
         }
         if (p === "/api/configuration/export" && req.method === "POST") {
           const value = await json(req);
@@ -241,12 +253,17 @@ export function createApp(
               throw new Error("请选择至少包含一条启用规则的规则组");
             if (!store.model().hasApiKey)
               throw new Error("请先在模型配置中填写 API Key");
-            const fileName = url.searchParams.get("fileName") || "方案.zip";
+            let fileName = url.searchParams.get("fileName") || "方案.zip";
             if (!/\.zip$/i.test(fileName) || fileName.length > 500)
               throw new Error("请选择 ZIP 方案包");
             let raw: Buffer;
             const references: ReferenceMaterial[] = [];
-            if (req.headers['content-type']?.startsWith('multipart/form-data')) {
+            if (req.headers['content-type']?.startsWith('application/json')) {
+              const input = await json(req);
+              const downloaded = await netcare.download(input.netcareNumber);
+              raw = downloaded.raw;
+              fileName = downloaded.fileName;
+            } else if (req.headers['content-type']?.startsWith('multipart/form-data')) {
               const bytes = await body(req, 102 * 1024 * 1024);
               const form = await new Response(bytes, { headers: { 'Content-Type': req.headers['content-type'] } }).formData();
               if (form.getAll('file').length !== 1) throw new Error('每次只能上传一个 ZIP 主方案');
@@ -457,5 +474,6 @@ export function createApp(
       if (mutation) activeWrites--;
     }
   });
-  return { server, engine };
+  server.on('close', () => netcare.close());
+  return { server, engine, netcare };
 }

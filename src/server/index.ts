@@ -32,7 +32,7 @@ try {
 writeFileSync(lock, String(process.pid), { flag: "wx", mode: 0o600 });
 const store = new Store(directory);
 initializePresets(store);
-const { server, engine } = createApp(store, undefined, { desktopSecret });
+const { server, engine, netcare } = createApp(store, undefined, { desktopSecret });
 const port = desktop ? 0 : Number(process.env.PORT || 4328);
 if (!Number.isSafeInteger(port) || port < (desktop ? 0 : 1) || port > 65535)
   throw new Error("PORT 无效");
@@ -40,6 +40,7 @@ let closing = false;
 async function stop() {
   if (closing) return;
   closing = true;
+  netcare.close();
   const deadline = setTimeout(() => process.exit(1), 10000);
   deadline.unref();
   await engine.stop();
@@ -75,6 +76,9 @@ if (desktop) {
   const input = createInterface({ input: process.stdin });
   input.on("line", (line) => {
     if (line === "shutdown") void stop();
+    else {
+      try { void netcare.receive(JSON.parse(line)).catch(() => {}); } catch { /* Ignore malformed parent messages. */ }
+    }
   });
   input.on("close", () => void stop());
 }

@@ -158,7 +158,8 @@ watch(() => props.taskId, () => {
     state.path = props.entryPath || state.htmlDocuments[0]?.Path || ''
     void load()
 }, { immediate: true })
-watch([() => props.finding, () => props.findingKey], () => { void focusFinding() })
+// 轮询会替换检查项对象；仅切换选中项或显式点击时定位，避免刷新打断手动滚动。
+watch([() => props.finding?.Id, () => props.findingKey], () => { void focusFinding() })
 watch(() => state.locationMessage, message => {
     if (message && props.finding?.Status === 'completed') notify.info({ message, duration: 3500 })
 })

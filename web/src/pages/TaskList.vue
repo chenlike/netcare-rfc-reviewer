@@ -34,6 +34,7 @@ import {
 import { api, save, uploadTask, dateText, statusText } from "../api";
 import type { Task, RuleGroup } from "../types/rfcAudit";
 import ReviewDetail from "./ReviewDetail.vue";
+import NetcareImport from '../components/NetcareImport.vue';
 const emit = defineEmits<{ navigate: [page: string] }>();
 const tasks = ref<Task[]>([]),
   groups = ref<RuleGroup[]>([]),
@@ -301,7 +302,10 @@ async function remove(task: Task) {
         </h1>
         <p>读懂方案，核验细节，让每一条结论都有据可查。</p>
       </div>
-      <Button @click="uploadOpen = true"><Plus />新建审核</Button>
+      <div class="flex items-center gap-2">
+        <NetcareImport :groups="groups" :model-ready="modelReady" @imported="task => { selected = task.Id; refresh(); }" />
+        <Button @click="uploadOpen = true"><Plus />新建审核</Button>
+      </div>
     </header>
     <div v-if="error" role="alert" class="error-banner">{{ error }}</div>
     <div v-if="!modelReady || !groups.length" class="onboarding card">
@@ -387,12 +391,24 @@ async function remove(task: Task) {
             @dblclick="selected = task.Id"
           >
             <td>
-              <button class="task-name" @click="selected = task.Id">
-                <span class="file-icon"><FileArchive :size="19" /></span
-                ><span
-                  >{{ task.Title }}<small>{{ task.GroupName }}</small></span
+              <div class="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  class="shrink-0"
+                  :aria-label="`重命名 ${task.Title}`"
+                  title="重命名方案"
+                  @click="rename(task)"
+                  @dblclick.stop
+                  ><Pencil :size="14" /></Button
                 >
-              </button>
+                <button class="task-name" @click="selected = task.Id">
+                  <span class="file-icon"><FileArchive :size="19" /></span
+                  ><span
+                    >{{ task.Title }}<small>{{ task.GroupName }}</small></span
+                  >
+                </button>
+              </div>
             </td>
             <td>
               <span class="status-pill" :class="task.Status"
@@ -434,12 +450,6 @@ async function remove(task: Task) {
                   :aria-label="`继续审核 ${task.Title}`"
                   @click="resumeTasks([task])"
                   ><Play /></Button
-                ><Button
-                  variant="ghost"
-                  size="icon-sm"
-                  :aria-label="`重命名 ${task.Title}`"
-                  @click="rename(task)"
-                  ><Pencil :size="14" /></Button
                 ><Button
                   variant="ghost"
                   size="icon-sm"

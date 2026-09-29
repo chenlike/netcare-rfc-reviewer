@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod netcare;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::{
@@ -27,6 +28,14 @@ struct Runtime {
     port: AtomicU16,
 }
 impl Runtime {
+    fn send(&self, value: &serde_json::Value) {
+        if let Ok(mut slot) = self.child.lock() {
+            if let Some(input) = slot.as_mut().and_then(|child| child.stdin.as_mut()) {
+                let _ = writeln!(input, "{value}");
+                let _ = input.flush();
+            }
+        }
+    }
     fn stop(&self) {
         if let Some(mut child) = self.child.lock().unwrap().take() {
             if let Some(mut input) = child.stdin.take() {
@@ -143,9 +152,44 @@ fn start_runtime(
         }
     });
     let (sender, receiver) = std::sync::mpsc::channel();
+    let event_app = app.clone();
+    let event_state = state.clone();
     std::thread::spawn(move || {
         for line in BufReader::new(output).lines().map_while(Result::ok) {
             if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
+                if value["event"] == "netcare_export_login" {
+                    let app = event_app.clone(); let state = event_state.clone();
+                    let id = value["requestId"].as_str().unwrap_or("").to_string();
+                    let number = value["number"].as_str().unwrap_or("").to_string();
+                    let _ = event_app.run_on_main_thread(move || {
+                        if netcare::open_export(&app, state.clone(), id.clone(), number).is_err() {
+                            state.send(&serde_json::json!({"event":"netcare_export_error","requestId":id}));
+                        }
+                    });
+                    continue;
+                }
+                if value["event"] == "netcare_export_complete" {
+                    let app = event_app.clone();
+                    let _ = event_app.run_on_main_thread(move || netcare::close_export(&app));
+                    continue;
+                }
+                if value["event"] == "netcare_login" {
+                    let app = event_app.clone();
+                    let state = event_state.clone();
+                    let clear = value["clear"].as_bool().unwrap_or(false);
+                    let id = value["requestId"].as_str().unwrap_or("").to_string();
+                    let _ = event_app.run_on_main_thread(move || {
+                        if netcare::open(&app, state.clone(), clear, id.clone()).is_err() {
+                            state.send(&serde_json::json!({"event":"netcare_login_error", "requestId":id,"message":"无法打开 Netcare 登录窗口，请重试"}));
+                        }
+                    });
+                    continue;
+                }
+                if value["event"] == "netcare_login_complete" || value["event"] == "netcare_login_cancel" {
+                    let app = event_app.clone();
+                    let _ = event_app.run_on_main_thread(move || netcare::close(&app));
+                    continue;
+                }
                 if value["event"] == "desktop_ready" {
                     if let Some(port) = value["port"].as_u64().filter(|p| *p > 0 && *p <= 65535) {
                         let _ = sender.send(port as u16);

@@ -119,7 +119,7 @@ watch(
 defineExpose({ mayLeave });
 </script>
 <template>
-  <section class="page settings-page">
+  <section class="page settings-page model-settings-page">
     <header class="page-heading">
       <div>
         <div class="eyebrow">偏好设置 / 模型</div>
@@ -138,6 +138,28 @@ defineExpose({ mayLeave });
       @submit.prevent="submit(false)"
     >
       <fieldset :disabled="busy || testing" class="contents">
+      <div class="form-actions model-settings-actions">
+        <span class="muted">{{
+          dirty ? "有未保存的修改" : "保存后对新启动的审核生效"
+        }}</span>
+        <div class="actions">
+          <Button
+            type="button"
+            variant="outline"
+            :disabled="
+              testing || !(model.apiKey?.trim() || model.hasApiKey) || busy
+            "
+            @click="test"
+            ><LoaderCircle v-if="testing" class="animate-spin" /><Plug
+              v-else
+            />测试当前连接</Button
+          ><Button type="submit" :disabled="busy || testing"
+            ><LoaderCircle v-if="busy" class="animate-spin" /><Check
+              v-else
+            />保存配置</Button
+          >
+        </div>
+      </div>
       <div class="settings-section">
         <div class="section-intro">
           <Plug :size="20" />
@@ -150,10 +172,10 @@ defineExpose({ mayLeave });
             ><Input
               id="model-url"
               v-model="model.baseUrl"
-              placeholder="https://api.example.com/v1"
+              placeholder="https://api.example.com"
             />
             <p class="field-hint">
-              Chat Completions 根地址，兼容接口通常需要保留 /v1。
+              Chat Completions 根地址，兼容接口通常需要保留 。
             </p>
           </div>
           <div class="form-grid">
@@ -306,28 +328,6 @@ defineExpose({ mayLeave });
       <div v-if="testError" class="error-banner" role="alert">
         {{ testError }}
       </div>
-      <div class="form-actions">
-        <span class="muted">{{
-          dirty ? "有未保存的修改" : "保存后对新启动的审核生效"
-        }}</span>
-        <div class="actions">
-          <Button
-            type="button"
-            variant="outline"
-            :disabled="
-              testing || !(model.apiKey?.trim() || model.hasApiKey) || busy
-            "
-            @click="test"
-            ><LoaderCircle v-if="testing" class="animate-spin" /><Plug
-              v-else
-            />测试当前连接</Button
-          ><Button type="submit" :disabled="busy || testing"
-            ><LoaderCircle v-if="busy" class="animate-spin" /><Check
-              v-else
-            />保存配置</Button
-          >
-        </div>
-      </div>
       <p class="storage-note">
         数据位置 <code>{{ directory }}</code>
       </p>
@@ -338,3 +338,28 @@ defineExpose({ mayLeave });
     </div>
   </section>
 </template>
+
+<style scoped>
+.model-settings-page {
+  --heading-top-space: 43px;
+  padding-top: 0;
+}
+.model-settings-page > .page-heading {
+  padding-top: var(--heading-top-space);
+}
+.model-settings-actions {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  margin-bottom: 28px;
+  border-top: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+}
+@media (max-width: 1150px) {
+  .model-settings-page { --heading-top-space: 30px; }
+}
+@media (max-width: 800px) {
+  .model-settings-page { --heading-top-space: 25px; }
+}
+</style>
